@@ -55,6 +55,7 @@ export interface AppSettings {
   timezone: string;
   language: "sv" | "en";
   theme: "dark" | "light";
+  dayBoundaryHour: number;
 }
 
 export interface PeptimeStore {

@@ -11,6 +11,8 @@ create table public.profiles (
   timezone text not null default 'Europe/Stockholm',
   theme text not null default 'dark' check (theme in ('dark','light')),
   syringe_type text not null default 'U-100 1 ml',
+  day_boundary_hour smallint not null default 4 check (day_boundary_hour between 0 and 8),
+  onboarding_complete boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -28,7 +30,7 @@ create table public.peptides (
   route public.peptide_route not null default 'subcutaneous',
   fasted boolean not null default false,
   fasted_note text not null default '',
-  mix_group_id uuid,
+  mix_group_id text,
   cycle_start date,
   weeks_on integer check (weeks_on > 0),
   weeks_off integer check (weeks_off >= 0),
@@ -82,7 +84,7 @@ create table public.dose_logs (
   taken_at timestamptz not null default now(),
   status public.dose_status not null,
   site text,
-  mix_group_id uuid,
+  mix_group_id text,
   vial_id uuid references public.vials(id) on delete set null,
   note text not null default '',
   created_at timestamptz not null default now(),
@@ -128,3 +130,6 @@ create policy "own vials" on public.vials for all using (user_id = auth.uid()) w
 create policy "own schedules" on public.schedules for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own logs" on public.dose_logs for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own daily notes" on public.daily_notes for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.profiles, public.peptides, public.vials, public.schedules, public.dose_logs, public.daily_notes to authenticated;

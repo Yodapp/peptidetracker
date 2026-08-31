@@ -13,6 +13,6 @@ export const initialStore: PeptimeStore = {
   peptides: examplePeptides,
   logs: [],
   dailyNotes: [],
-  settings: { syringe: "U-100 1 ml", timezone: "Europe/Stockholm", language: "sv", theme: "dark" },
+  settings: { syringe: "U-100 1 ml", timezone: "Europe/Stockholm", language: "sv", theme: "dark", dayBoundaryHour: 4 },
   onboardingComplete: false,
 };
