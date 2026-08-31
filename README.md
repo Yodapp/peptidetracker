@@ -2,7 +2,7 @@
 
 Peptime is a private, mobile-first peptide research logger. The interface is Swedish-first, uses Europe/Stockholm dates, defaults to dark mode, and keeps U-100 syringe units visible anywhere an injectable dose is shown.
 
-> Research log only. Not medical advice. Not for human-use claims.
+> Log what you want. Peptime contains no medical advice.
 
 ## What is included
 
