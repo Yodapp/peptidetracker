@@ -12,6 +12,7 @@ create table public.profiles (
   theme text not null default 'dark' check (theme in ('dark','light')),
   syringe_type text not null default 'U-100 1 ml',
   day_boundary_hour smallint not null default 4 check (day_boundary_hour between 0 and 8),
+  reminders_enabled boolean not null default false,
   onboarding_complete boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -62,14 +63,35 @@ create table public.schedules (
   peptide_id uuid not null references public.peptides(id) on delete cascade,
   slot public.dose_slot not null,
   clock_time time,
-  frequency text not null default 'daily' check (frequency in ('daily','selected_weekdays','every_n_days','times_per_week')),
+  frequency text not null default 'daily' check (frequency in ('daily','selected_weekdays','every_n_days','as_needed')),
   weekdays smallint[] not null default array[]::smallint[],
-  every_n_days integer check (every_n_days > 0),
+  every_n_days integer check (every_n_days >= 2),
   times_per_week integer check (times_per_week between 1 and 7),
   starts_on date not null default current_date,
+  paused boolean not null default false,
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table public.mix_groups (
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  name text not null check (char_length(name) between 1 and 100),
+  name_key text not null,
+  slot public.dose_slot not null,
+  clock_time time,
+  frequency text not null default 'daily' check (frequency in ('daily','selected_weekdays','every_n_days','as_needed')),
+  weekdays smallint[] not null default array[]::smallint[],
+  every_n_days integer check (every_n_days >= 2),
+  anchor_date date,
+  paused boolean not null default false,
+  cycle_start date,
+  weeks_on integer check (weeks_on > 0),
+  weeks_off integer check (weeks_off >= 0),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, name_key)
 );
 
 create table public.dose_logs (
@@ -110,6 +132,7 @@ begin new.updated_at = now(); return new; end; $$;
 create trigger profiles_touch before update on public.profiles for each row execute function public.touch_updated_at();
 create trigger peptides_touch before update on public.peptides for each row execute function public.touch_updated_at();
 create trigger schedules_touch before update on public.schedules for each row execute function public.touch_updated_at();
+create trigger mix_groups_touch before update on public.mix_groups for each row execute function public.touch_updated_at();
 create trigger dose_logs_touch before update on public.dose_logs for each row execute function public.touch_updated_at();
 create trigger daily_notes_touch before update on public.daily_notes for each row execute function public.touch_updated_at();
 
@@ -121,6 +144,7 @@ alter table public.profiles enable row level security;
 alter table public.peptides enable row level security;
 alter table public.vials enable row level security;
 alter table public.schedules enable row level security;
+alter table public.mix_groups enable row level security;
 alter table public.dose_logs enable row level security;
 alter table public.daily_notes enable row level security;
 
@@ -128,8 +152,9 @@ create policy "own profile" on public.profiles for all using (id = auth.uid()) w
 create policy "own peptides" on public.peptides for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own vials" on public.vials for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own schedules" on public.schedules for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "own mix groups" on public.mix_groups for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own logs" on public.dose_logs for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own daily notes" on public.daily_notes for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 grant usage on schema public to authenticated;
-grant select, insert, update, delete on public.profiles, public.peptides, public.vials, public.schedules, public.dose_logs, public.daily_notes to authenticated;
+grant select, insert, update, delete on public.profiles, public.peptides, public.vials, public.schedules, public.mix_groups, public.dose_logs, public.daily_notes to authenticated;

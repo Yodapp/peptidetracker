@@ -1,6 +1,24 @@
 export type Slot = "morning" | "lunch" | "evening" | "as_needed";
 export type Route = "subcutaneous" | "intranasal" | "oral" | "topical";
 export type DoseStatus = "taken" | "skipped";
+export type ScheduleFrequency = "daily" | "weekdays" | "every_n_days" | "as_needed";
+
+export interface Schedule {
+  slot: Slot;
+  time: string;
+  frequency: ScheduleFrequency;
+  weekdays: number[];
+  everyNDays?: number;
+  anchorDate?: string;
+  paused: boolean;
+  cycleStart?: string;
+  weeksOn?: number;
+  weeksOff?: number;
+}
+
+export interface MixGroupSchedule extends Schedule {
+  name: string;
+}
 
 export interface Peptide {
   id: string;
@@ -14,9 +32,11 @@ export interface Peptide {
   route: Route;
   slot: Slot;
   time: string;
-  frequency: "daily" | "weekdays" | "interval" | "weekly";
+  frequency: ScheduleFrequency;
   weekdays: number[];
-  intervalDays?: number;
+  everyNDays?: number;
+  anchorDate?: string;
+  paused: boolean;
   fasted: boolean;
   fastedNote: string;
   mixGroupId?: string;
@@ -56,12 +76,15 @@ export interface AppSettings {
   language: "sv" | "en";
   theme: "dark" | "light";
   dayBoundaryHour: number;
+  remindersEnabled: boolean;
 }
 
 export interface PeptimeStore {
   peptides: Peptide[];
+  mixGroups: MixGroupSchedule[];
   logs: DoseLog[];
   dailyNotes: DailyNote[];
+  todayAdditions: string[];
   settings: AppSettings;
   onboardingComplete: boolean;
 }

@@ -11,7 +11,7 @@ Peptime is a private, mobile-first peptide research logger. The interface is Swe
 - Automatic concentration and U-100 calculation: `dose_mcg / (vial_mg / water_ml * 1000) * 100`
 - Supabase-backed cross-device storage with local cache, installable PWA shell, light/dark mode, and daily autosave note
 - History with filters and edit/delete, peptide/vial editor and archive, monthly calendar, CSV/JSON export
-- Supabase email magic-link authentication gate and production-ready PostgreSQL schema with RLS on every user table
+- Supabase email magic-link authentication with an in-PWA email-code fallback and RLS on every user table
 - Configurable log-day boundary (04:00 by default) so after-midnight bedtime doses remain on the intended day
 - Case-insensitive mix groups with suggestions from existing groups
 
@@ -45,9 +45,18 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000
 
 When these variables exist, the root route is private and unauthenticated users are sent to the magic-link login screen. Peptides, schedules, vial state, logs, daily notes, and settings sync to Supabase under the authenticated user. RLS remains the security boundary.
 
+For iPhone Home Screen login, keep the magic link and also expose the email OTP in **Authentication → Email Templates → Magic Link**. The template can use both the existing confirmation URL and `{{ .Token }}`. A minimal addition is: `Engångskod: {{ .Token }}`. The user can enter that code inside the installed Peptime PWA, so the session is created in the PWA rather than in Safari.
+
+Supabase sessions refresh automatically and, by default, remain valid until the user signs out or the session is revoked. Increasing the short-lived access-token duration is therefore not needed for normal Peptime use.
+
 ### Upgrade an existing Peptime database
 
-Run [`supabase/migrations/202609010001_cross_device_and_log_day.sql`](supabase/migrations/202609010001_cross_device_and_log_day.sql) once in Supabase SQL Editor before deploying this version. It adds the log-day preference, persists onboarding state, changes mix groups to free-text identifiers, and grants the authenticated role access behind RLS.
+Run these migrations once, in order, in Supabase SQL Editor before deploying this version:
+
+1. [`supabase/migrations/202609010001_cross_device_and_log_day.sql`](supabase/migrations/202609010001_cross_device_and_log_day.sql)
+2. [`supabase/migrations/202609010002_group_schedules_and_reminders.sql`](supabase/migrations/202609010002_group_schedules_and_reminders.sql)
+
+The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`.
 
 On the first signed-in load after upgrading, Peptime uploads existing browser data if the remote account is empty. It also merges locally added peptides if another device reached the account first.
 
@@ -59,6 +68,12 @@ On the first signed-in load after upgrading, Peptime uploads existing browser da
 4. Deploy, then add the exact production callback URL in Supabase Authentication.
 
 Vercel will run `npm run build` using the stable webpack compiler. No service-role key is needed or expected in the browser.
+
+## Web Push reminders
+
+The app contains a safe notification-permission flow and service-worker handlers. The switch defaults to off and remains off if permission is denied. iOS Web Push requires Peptime to be installed on the Home Screen and permission to be requested from the installed app.
+
+Production delivery still needs a server-side Web Push scheduler. Configure VAPID keys in Vercel (`NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`), store each authenticated user's Push API subscription in a protected Supabase table, and schedule one message per due time slot. The payload should combine all items in the slot, for example `Morgon 08:00 — Adamax 2 IU, Selank 5 IU`; do not enqueue one message per peptide. Browser push delivery is best-effort and should not be presented as native-app reliability.
 
 ## Data and privacy notes
 

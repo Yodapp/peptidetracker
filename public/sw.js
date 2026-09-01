@@ -12,3 +12,18 @@ self.addEventListener("fetch", event => {
     return response;
   }).catch(() => caches.match(event.request).then(hit => hit || caches.match("/"))));
 });
+self.addEventListener("push", event => {
+  let payload = { title: "Peptime", body: "Du har en planerad loggpost." };
+  try { payload = { ...payload, ...event.data.json() }; } catch {}
+  event.waitUntil(self.registration.showNotification(payload.title, {
+    body: payload.body,
+    icon: "/icon.svg",
+    badge: "/icon.svg",
+    tag: payload.tag || "peptime-slot",
+    data: { url: payload.url || "/" },
+  }));
+});
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  event.waitUntil(self.clients.openWindow(event.notification.data?.url || "/"));
+});
