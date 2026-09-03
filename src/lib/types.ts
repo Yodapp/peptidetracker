@@ -73,6 +73,7 @@ export interface DoseLog {
 export interface DailyNote { date: string; note: string }
 export interface AppSettings {
   syringe: "U-100 1 ml" | "U-100 0.5 ml";
+  massDisplayUnit: "mcg" | "mg";
   timezone: string;
   language: "sv" | "en";
   theme: "dark" | "light";

@@ -9,6 +9,7 @@ Peptime is a private, mobile-first peptide research logger. The interface is Swe
 - Four-step first run with persistent disclaimer, syringe choice, vial-math preview, and optional clearly marked example rows
 - One-handed Today flow with mix-group cards, two-tap Take logging, optional site picker, Skip, one-time adjustment, and 30-second undo
 - Automatic concentration and U-100 calculation: `dose_mcg / (vial_mg / water_ml * 1000) * 100`
+- Compact per-IU mass comparison on Today, selectable as mcg or mg without showing both at once
 - Supabase-backed cross-device storage with local cache, installable PWA shell, light/dark mode, and daily autosave note
 - History with filters and edit/delete, peptide/vial editor and archive, monthly calendar, CSV/JSON export
 - Supabase email magic-link authentication with an in-PWA email-code fallback and RLS on every user table
@@ -57,8 +58,9 @@ Run these migrations once, in order, in Supabase SQL Editor before deploying thi
 1. [`supabase/migrations/202609010001_cross_device_and_log_day.sql`](supabase/migrations/202609010001_cross_device_and_log_day.sql)
 2. [`supabase/migrations/202609010002_group_schedules_and_reminders.sql`](supabase/migrations/202609010002_group_schedules_and_reminders.sql)
 3. [`supabase/migrations/202609030001_scheduled_log_date.sql`](supabase/migrations/202609030001_scheduled_log_date.sql)
+4. [`supabase/migrations/202609040001_mass_display_unit.sql`](supabase/migrations/202609040001_mass_display_unit.sql)
 
-The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary.
+The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary. The fourth syncs the user's mcg/mg display preference for the per-IU comparison.
 
 On the first signed-in load after upgrading, Peptime uploads existing browser data if the remote account is empty. It also merges locally added peptides if another device reached the account first.
 

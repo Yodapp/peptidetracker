@@ -11,6 +11,7 @@ create table public.profiles (
   timezone text not null default 'Europe/Stockholm',
   theme text not null default 'dark' check (theme in ('dark','light')),
   syringe_type text not null default 'U-100 1 ml',
+  mass_display_unit text not null default 'mcg' check (mass_display_unit in ('mcg','mg')),
   day_boundary_hour smallint not null default 4 check (day_boundary_hour between 0 and 8),
   reminders_enabled boolean not null default false,
   onboarding_complete boolean not null default false,

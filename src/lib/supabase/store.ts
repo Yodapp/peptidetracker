@@ -36,7 +36,7 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
     mixGroups: (store.mixGroups ?? []).map(group => ({ ...group, weekdays: group.weekdays ?? [], paused: group.paused ?? false })),
     logs,
     todayAdditions: store.todayAdditions ?? [],
-    settings: { ...store.settings, dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
+    settings: { ...store.settings, massDisplayUnit: store.settings.massDisplayUnit === "mg" ? "mg" : "mcg", dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
   };
 }
 
@@ -184,6 +184,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     todayAdditions: [],
     settings: {
       syringe: profile?.syringe_type === "U-100 0.5 ml" ? "U-100 0.5 ml" : "U-100 1 ml",
+      massDisplayUnit: profile?.mass_display_unit === "mg" ? "mg" : fallback.settings.massDisplayUnit === "mg" ? "mg" : "mcg",
       timezone: profile?.timezone ?? "Europe/Stockholm",
       language: profile?.language === "en" ? "en" : "sv",
       theme: profile?.theme === "light" ? "light" : "dark",
@@ -207,7 +208,8 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
   const frequency = (value: ScheduleFrequency) => value === "weekdays" ? "selected_weekdays" : value;
   const results = [];
   const profile = { id: userId, language: store.settings.language, timezone: store.settings.timezone, theme: store.settings.theme, syringe_type: store.settings.syringe, day_boundary_hour: store.settings.dayBoundaryHour, onboarding_complete: store.onboardingComplete };
-  let profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled }, { onConflict: "id" });
+  let profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled, mass_display_unit: store.settings.massDisplayUnit }, { onConflict: "id" });
+  if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled }, { onConflict: "id" });
   if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert(profile, { onConflict: "id" });
   results.push(profileResult);
   let mixGroupsSupported = !store.peptides.some(peptide => peptide.mixGroupId);
