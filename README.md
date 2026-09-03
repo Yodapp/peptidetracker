@@ -12,7 +12,8 @@ Peptime is a private, mobile-first peptide research logger. The interface is Swe
 - Supabase-backed cross-device storage with local cache, installable PWA shell, light/dark mode, and daily autosave note
 - History with filters and edit/delete, peptide/vial editor and archive, monthly calendar, CSV/JSON export
 - Supabase email magic-link authentication with an in-PWA email-code fallback and RLS on every user table
-- Configurable log-day boundary (04:00 by default) so after-midnight bedtime doses remain on the intended day
+- Separate scheduled day and actual timestamp: unfinished doses from yesterday remain available until 12:00 while a late log keeps its real time
+- Editable scheduled day and actual time in Logg, with the same scheduled-day grouping in Kalender and exports
 - Case-insensitive mix groups with suggestions from existing groups
 
 No doses or protocols in the example data are recommendations. They are UI demonstration rows only and are labeled as examples in the app.
@@ -55,8 +56,9 @@ Run these migrations once, in order, in Supabase SQL Editor before deploying thi
 
 1. [`supabase/migrations/202609010001_cross_device_and_log_day.sql`](supabase/migrations/202609010001_cross_device_and_log_day.sql)
 2. [`supabase/migrations/202609010002_group_schedules_and_reminders.sql`](supabase/migrations/202609010002_group_schedules_and_reminders.sql)
+3. [`supabase/migrations/202609030001_scheduled_log_date.sql`](supabase/migrations/202609030001_scheduled_log_date.sql)
 
-The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`.
+The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary.
 
 On the first signed-in load after upgrading, Peptime uploads existing browser data if the remote account is empty. It also merges locally added peptides if another device reached the account first.
 

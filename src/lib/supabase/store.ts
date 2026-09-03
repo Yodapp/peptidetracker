@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DoseLog, MixGroupSchedule, Peptide, PeptimeStore, ScheduleFrequency } from "@/lib/types";
 import { groupKey } from "@/lib/schedule";
+import { effectiveLogDate } from "@/lib/log-day";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -10,6 +11,7 @@ function text(value: unknown, fallback = "") { return typeof value === "string" 
 function optionalText(value: unknown) { const result = text(value).trim(); return result || undefined; }
 
 export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
+  const dayBoundaryHour = store.settings.dayBoundaryHour ?? 4;
   const ids = new Map<string, string>();
   const peptides = store.peptides.map(peptide => {
     const id = uuidPattern.test(peptide.id) ? peptide.id : uuid();
@@ -26,7 +28,7 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
   });
   const validIds = new Set(peptides.map(peptide => peptide.id));
   const logs = store.logs
-    .map(log => ({ ...log, id: uuidPattern.test(log.id) ? log.id : uuid(), peptideId: ids.get(log.peptideId) ?? log.peptideId }))
+    .map(log => ({ ...log, id: uuidPattern.test(log.id) ? log.id : uuid(), peptideId: ids.get(log.peptideId) ?? log.peptideId, scheduledDate: log.scheduledDate ?? effectiveLogDate(log.takenAt, dayBoundaryHour) }))
     .filter(log => validIds.has(log.peptideId));
   return {
     ...store,
@@ -34,7 +36,7 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
     mixGroups: (store.mixGroups ?? []).map(group => ({ ...group, weekdays: group.weekdays ?? [], paused: group.paused ?? false })),
     logs,
     todayAdditions: store.todayAdditions ?? [],
-    settings: { ...store.settings, dayBoundaryHour: store.settings.dayBoundaryHour ?? 4, remindersEnabled: store.settings.remindersEnabled ?? false },
+    settings: { ...store.settings, dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
   };
 }
 
@@ -166,6 +168,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     computedIu: number(row.computed_iu),
     slot: row.slot,
     takenAt: row.taken_at,
+    scheduledDate: row.scheduled_date ?? undefined,
     status: row.status,
     site: row.site ?? undefined,
     mixGroupId: optionalText(row.mix_group_id),
@@ -227,7 +230,7 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
     if (mixGroupsSupported && groupedIds.length) results.push(await client.from("schedules").delete().in("peptide_id", groupedIds));
   }
   results.push(await client.from("dose_logs").delete().eq("user_id", userId));
-  if (store.logs.length) results.push(await client.from("dose_logs").insert(store.logs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }))));
+  if (store.logs.length) results.push(await client.from("dose_logs").insert(store.logs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }))));
   if (store.dailyNotes.length) results.push(await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" }));
   const error = results.find(result => result.error)?.error;
   if (error) throw error;

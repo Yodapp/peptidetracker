@@ -104,6 +104,7 @@ create table public.dose_logs (
   computed_iu numeric(12,4) check (computed_iu >= 0),
   slot public.dose_slot not null,
   taken_at timestamptz not null default now(),
+  scheduled_date date not null,
   status public.dose_status not null,
   site text,
   mix_group_id text,

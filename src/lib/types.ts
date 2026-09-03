@@ -62,6 +62,7 @@ export interface DoseLog {
   computedIu: number;
   slot: Slot;
   takenAt: string;
+  scheduledDate?: string;
   status: DoseStatus;
   site?: string;
   mixGroupId?: string;
