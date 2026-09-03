@@ -229,8 +229,22 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
     }
     if (mixGroupsSupported && groupedIds.length) results.push(await client.from("schedules").delete().in("peptide_id", groupedIds));
   }
-  results.push(await client.from("dose_logs").delete().eq("user_id", userId));
-  if (store.logs.length) results.push(await client.from("dose_logs").insert(store.logs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }))));
+  const logRows = store.logs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }));
+  if (logRows.length) {
+    const logResult = await client.from("dose_logs").upsert(logRows, { onConflict: "id" });
+    results.push(logResult);
+    if (!logResult.error) {
+      const existingResult = await client.from("dose_logs").select("id").eq("user_id", userId);
+      results.push(existingResult);
+      if (!existingResult.error) {
+        const localIds = new Set(logRows.map(row => row.id));
+        const staleIds = (existingResult.data ?? []).map(row => row.id).filter(id => !localIds.has(id));
+        for (let index = 0; index < staleIds.length; index += 100) results.push(await client.from("dose_logs").delete().in("id", staleIds.slice(index, index + 100)));
+      }
+    }
+  } else {
+    results.push(await client.from("dose_logs").delete().eq("user_id", userId));
+  }
   if (store.dailyNotes.length) results.push(await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" }));
   const error = results.find(result => result.error)?.error;
   if (error) throw error;

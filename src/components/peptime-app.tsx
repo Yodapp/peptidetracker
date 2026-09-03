@@ -30,11 +30,16 @@ function useStore() {
   const [store, setStore] = useState<PeptimeStore>(() => normalizeStoreIds(initialStore));
   const [ready, setReady] = useState(false);
   const [syncState, setSyncState] = useState<"local" | "syncing" | "synced" | "error">("local");
+  const [hydrateAttempt, setHydrateAttempt] = useState(0);
+  const [saveAttempt, setSaveAttempt] = useState(0);
   const clientRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   const userIdRef = useRef<string | null>(null);
   const skipFirstSync = useRef(false);
+  const hydrateFailures = useRef(0);
+  const saveFailures = useRef(0);
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: number | undefined;
     async function hydrate() {
       const hasRemote = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
       if (!hasRemote) {
@@ -42,7 +47,9 @@ function useStore() {
         if (!cancelled) setReady(true);
         return;
       }
+      let cached: PeptimeStore | null = null;
       try {
+        setSyncState("syncing");
         const client = createSupabaseBrowserClient();
         const { data } = await client.auth.getUser();
         if (!data.user) throw new Error("No authenticated Supabase user");
@@ -51,6 +58,7 @@ function useStore() {
         const scopedKey = `${STORAGE_KEY}:${data.user.id}`;
         const saved = localStorage.getItem(scopedKey) ?? localStorage.getItem(STORAGE_KEY);
         const local = saved ? normalizeStoreIds(JSON.parse(saved)) : normalizeStoreIds(initialStore);
+        cached = saved ? local : null;
         const remote = await loadRemoteStore(client, local);
         let next = remote.store;
         const merged = mergeStores(remote.store, local);
@@ -64,6 +72,7 @@ function useStore() {
           setSyncState(remote.hasData ? "synced" : "local");
         }
         if (!cancelled) {
+          hydrateFailures.current = 0;
           skipFirstSync.current = true;
           setStore(next);
           setReady(true);
@@ -72,14 +81,22 @@ function useStore() {
         console.error("Peptime Supabase hydration error", error);
         clientRef.current = null;
         userIdRef.current = null;
-        if (!cancelled) { setSyncState("error"); setReady(true); }
+        if (!cancelled) {
+          if (cached?.onboardingComplete) { setStore(cached); setReady(true); }
+          else setReady(false);
+          setSyncState("error");
+          hydrateFailures.current += 1;
+          const delay = Math.min(30000, 3000 * hydrateFailures.current);
+          retryTimer = window.setTimeout(() => setHydrateAttempt(value => value + 1), delay);
+        }
       }
     }
     hydrate();
-    return () => { cancelled = true; };
-  }, []);
+    return () => { cancelled = true; if (retryTimer) window.clearTimeout(retryTimer); };
+  }, [hydrateAttempt]);
   useEffect(() => {
     if (!ready) return;
+    let retryTimer: number | undefined;
     const key = userIdRef.current ? `${STORAGE_KEY}:${userIdRef.current}` : STORAGE_KEY;
     localStorage.setItem(key, JSON.stringify(store));
     if (!clientRef.current || !userIdRef.current) return;
@@ -87,12 +104,22 @@ function useStore() {
     const client = clientRef.current;
     const userId = userIdRef.current;
     const timer = window.setTimeout(async () => {
-      try { setSyncState("syncing"); await saveRemoteStore(client, userId, store); setSyncState("synced"); }
-      catch (error) { console.error("Peptime Supabase sync error", error); setSyncState("error"); }
+      try { setSyncState("syncing"); await saveRemoteStore(client, userId, store); saveFailures.current = 0; setSyncState("synced"); }
+      catch (error) {
+        console.error("Peptime Supabase sync error", error);
+        setSyncState("error");
+        saveFailures.current += 1;
+        const delay = Math.min(30000, 3000 * saveFailures.current);
+        retryTimer = window.setTimeout(() => setSaveAttempt(value => value + 1), delay);
+      }
     }, 650);
-    return () => window.clearTimeout(timer);
-  }, [ready, store]);
-  return [store, setStore, ready, syncState] as const;
+    return () => { window.clearTimeout(timer); if (retryTimer) window.clearTimeout(retryTimer); };
+  }, [ready, store, saveAttempt]);
+  const retrySync = () => {
+    if (clientRef.current && userIdRef.current && ready) setSaveAttempt(value => value + 1);
+    else setHydrateAttempt(value => value + 1);
+  };
+  return [store, setStore, ready, syncState, retrySync] as const;
 }
 
 function PageHeader({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: React.ReactNode }) {
@@ -219,21 +246,21 @@ function CalendarView({ store }: { store: PeptimeStore }) {
   return <><PageHeader eyebrow="Översikt" title="Kalender"/><Card className="p-4"><div className="mb-5 flex items-center justify-between"><Button variant="ghost" size="icon" onClick={()=>setCursor(new Date(year,month-1,1))}><ChevronLeft/></Button><p className="font-medium capitalize">{new Intl.DateTimeFormat("sv-SE",{month:"long",year:"numeric"}).format(cursor)}</p><Button variant="ghost" size="icon" onClick={()=>setCursor(new Date(year,month+1,1))}><ChevronRight/></Button></div><div className="grid grid-cols-7 text-center text-[11px] text-muted-foreground">{"M T O T F L S".split(" ").map((d,i)=><span key={i} className="py-2">{d}</span>)}{cells.map((day,i)=>day?<button key={i} onClick={()=>setSelected(iso(day))} className={`relative mx-auto grid size-11 place-items-center rounded-full text-sm ${selected===iso(day)?"bg-primary text-primary-foreground":""}`}>{day}{store.logs.some(l=>logScheduledDate(l,store.settings.dayBoundaryHour)===iso(day))&&<span className={`absolute bottom-1 size-1 rounded-full ${selected===iso(day)?"bg-primary-foreground":"bg-primary"}`}/>}</button>:<span key={i}/>)}</div></Card><section className="mt-6"><h2 className="mb-3 text-sm font-medium">{selected}</h2>{dayLogs.length===0&&!dayNote?<p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Inga poster denna dag.</p>:<Card className="divide-y divide-border">{dayLogs.map(l=><div key={l.id} className="flex min-h-14 items-center justify-between gap-3 px-4 text-sm"><span>{l.peptideName}</span><span className="text-right text-muted-foreground">{l.status==="taken"?`${n(l.actualDose)} mcg · ${n(l.computedIu)} IU`:"Överhoppad"}<span className="ml-2 tabular-nums">{new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Stockholm",hour:"2-digit",minute:"2-digit"}).format(new Date(l.takenAt))}</span></span></div>)}{dayNote&&<div className="p-4"><p className="mb-2 text-xs text-muted-foreground">Dagens anteckning</p><p className="text-sm leading-6">{dayNote}</p></div>}</Card>}</section></>;
 }
 
-function SettingsView({ store, update, syncState, userEmail }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; syncState: "local" | "syncing" | "synced" | "error"; userEmail?: string }) {
+function SettingsView({ store, update, syncState, retrySync, userEmail }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; syncState: "local" | "syncing" | "synced" | "error"; retrySync: () => void; userEmail?: string }) {
   const download=(type:"json"|"csv")=>{let body:string,mime:string,name:string;if(type==="json"){body=JSON.stringify({logs:store.logs,daily_notes:store.dailyNotes},null,2);mime="application/json";name="peptime-export.json"}else{const rows=[["peptide","planned_dose","actual_dose","unit","computed_iu","slot","scheduled_date","taken_at","status","site","note"],...store.logs.map(l=>[l.peptideName,l.plannedDose,l.actualDose,l.unit,l.computedIu,l.slot,logScheduledDate(l,store.settings.dayBoundaryHour),l.takenAt,l.status,l.site??"",l.note])];body=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");mime="text/csv";name="peptime-logs.csv"}const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([body],{type:mime}));a.download=name;a.click();URL.revokeObjectURL(a.href)};
   const setTheme=(dark:boolean)=>{document.documentElement.classList.toggle("dark",dark);update(s=>({...s,settings:{...s.settings,theme:dark?"dark":"light"}}))};
   const setReminders=async(enabled:boolean)=>{if(!enabled){update(s=>({...s,settings:{...s.settings,remindersEnabled:false}}));return}try{if(!("Notification" in window))return;const permission=await Notification.requestPermission();if(permission==="granted")update(s=>({...s,settings:{...s.settings,remindersEnabled:true}}))}catch{}}
   const syncText = syncState === "synced" ? "Synkad med ditt konto" : syncState === "syncing" ? "Synkar…" : syncState === "error" ? "Synkfel · kontrollera anslutningen" : "Sparas på den här enheten";
-  return <><PageHeader eyebrow="Peptime" title="Inställningar"/><div className="space-y-5"><Card className="divide-y divide-border"><SettingRow label="Spruta"><select className="bg-transparent text-right text-sm" value={store.settings.syringe} onChange={e=>update(s=>({...s,settings:{...s.settings,syringe:e.target.value as PeptimeStore["settings"]["syringe"]}}))}><option>U-100 1 ml</option><option>U-100 0.5 ml</option></select></SettingRow><SettingRow label="Tidszon"><span className="text-sm text-muted-foreground">Europe/Stockholm</span></SettingRow><SettingRow label="Språk"><select className="bg-transparent text-sm" value={store.settings.language} onChange={e=>update(s=>({...s,settings:{...s.settings,language:e.target.value as "sv"|"en"}}))}><option value="sv">Svenska</option><option value="en">English</option></select></SettingRow><SettingRow label="Mörkt tema"><Switch checked={store.settings.theme==="dark"} onCheckedChange={setTheme}/></SettingRow></Card><section><h2 className="mb-3 text-sm font-medium">Påminnelser</h2><Card><SettingRow label="Påminnelser"><Switch aria-label="Påminnelser" checked={store.settings.remindersEnabled} onCheckedChange={setReminders}/></SettingRow><div className="border-t border-border px-4 py-3 text-xs leading-5 text-muted-foreground"><p className="flex gap-2"><Bell className="mt-0.5 size-4 shrink-0"/>Lägg till på hemskärmen, slå sedan på notiser.</p><p className="mt-2">Notiser kan levereras med Web Push men har inte samma leveransgaranti som en native-app.</p></div></Card></section><section><h2 className="mb-3 text-sm font-medium">Export</h2><Card className="grid grid-cols-2 gap-2 p-3"><Button variant="outline" className="h-12" onClick={()=>download("csv")}><Download/> CSV</Button><Button variant="outline" className="h-12" onClick={()=>download("json")}><Download/> JSON</Button></Card></section><Card className="p-5"><div className="flex gap-3"><ShieldCheck className="size-5 shrink-0 text-accent-foreground"/><div className="min-w-0"><p className="font-medium">Om Peptime</p><p className="mt-2 text-sm leading-6 text-muted-foreground">{disclaimer}</p>{userEmail&&<p className="mt-3 truncate text-xs text-muted-foreground">Inloggad som {userEmail}</p>}<p className={`mt-1 text-xs ${syncState==="error"?"text-destructive":"text-muted-foreground"}`}>{syncText}</p></div></div></Card><form action="/auth/signout" method="post"><Button type="submit" variant="outline" className="h-12 w-full">Logga ut</Button></form></div></>;
+  return <><PageHeader eyebrow="Peptime" title="Inställningar"/><div className="space-y-5"><Card className="divide-y divide-border"><SettingRow label="Spruta"><select className="bg-transparent text-right text-sm" value={store.settings.syringe} onChange={e=>update(s=>({...s,settings:{...s.settings,syringe:e.target.value as PeptimeStore["settings"]["syringe"]}}))}><option>U-100 1 ml</option><option>U-100 0.5 ml</option></select></SettingRow><SettingRow label="Tidszon"><span className="text-sm text-muted-foreground">Europe/Stockholm</span></SettingRow><SettingRow label="Språk"><select className="bg-transparent text-sm" value={store.settings.language} onChange={e=>update(s=>({...s,settings:{...s.settings,language:e.target.value as "sv"|"en"}}))}><option value="sv">Svenska</option><option value="en">English</option></select></SettingRow><SettingRow label="Mörkt tema"><Switch checked={store.settings.theme==="dark"} onCheckedChange={setTheme}/></SettingRow></Card><section><h2 className="mb-3 text-sm font-medium">Påminnelser</h2><Card><SettingRow label="Påminnelser"><Switch aria-label="Påminnelser" checked={store.settings.remindersEnabled} onCheckedChange={setReminders}/></SettingRow><div className="border-t border-border px-4 py-3 text-xs leading-5 text-muted-foreground"><p className="flex gap-2"><Bell className="mt-0.5 size-4 shrink-0"/>Lägg till på hemskärmen, slå sedan på notiser.</p><p className="mt-2">Notiser kan levereras med Web Push men har inte samma leveransgaranti som en native-app.</p></div></Card></section><section><h2 className="mb-3 text-sm font-medium">Export</h2><Card className="grid grid-cols-2 gap-2 p-3"><Button variant="outline" className="h-12" onClick={()=>download("csv")}><Download/> CSV</Button><Button variant="outline" className="h-12" onClick={()=>download("json")}><Download/> JSON</Button></Card></section><Card className="p-5"><div className="flex gap-3"><ShieldCheck className="size-5 shrink-0 text-accent-foreground"/><div className="min-w-0"><p className="font-medium">Om Peptime</p><p className="mt-2 text-sm leading-6 text-muted-foreground">{disclaimer}</p>{userEmail&&<p className="mt-3 truncate text-xs text-muted-foreground">Inloggad som {userEmail}</p>}<p className={`mt-1 text-xs ${syncState==="error"?"text-destructive":"text-muted-foreground"}`}>{syncText}</p>{syncState==="error"&&<Button variant="outline" className="mt-3 h-10" onClick={retrySync}><RotateCcw/> Försök igen</Button>}</div></div></Card><form action="/auth/signout" method="post"><Button type="submit" variant="outline" className="h-12 w-full">Logga ut</Button></form></div></>;
 }
 
 function SettingRow({label,children}:{label:string;children:React.ReactNode}) { return <div className="flex min-h-14 items-center justify-between gap-4 px-4"><span className="text-sm">{label}</span>{children}</div> }
 
 export function PeptimeApp({ userEmail }: { userEmail?: string }) {
-  const [store,update,ready,syncState]=useStore(); const [view,setView]=useState("today");
+  const [store,update,ready,syncState,retrySync]=useStore(); const [view,setView]=useState("today");
   useEffect(()=>{document.documentElement.classList.toggle("dark",store.settings.theme!=="light")},[store.settings.theme]);
   useEffect(()=>{if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>undefined)},[]);
-  if(!ready)return <div className="min-h-dvh bg-background"/>;
+  if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><RotateCcw className="mx-auto size-7 text-muted-foreground"/><h1 className="mt-4 text-xl font-medium">Kunde inte hämta ditt konto</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p><Button className="mt-5 h-12 w-full" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
   if(!store.onboardingComplete)return <Onboarding store={store} update={update}/>;
-  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-28 pt-7 shadow-2xl shadow-black/10 sm:px-6">{view==="today"&&<TodayView store={store} update={update}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update}/>} {view==="calendar"&&<CalendarView store={store}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} userEmail={userEmail}/>}<BottomNav view={view} setView={setView}/></main>;
+  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-28 pt-7 shadow-2xl shadow-black/10 sm:px-6">{view==="today"&&<TodayView store={store} update={update}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update}/>} {view==="calendar"&&<CalendarView store={store}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} userEmail={userEmail}/>}<BottomNav view={view} setView={setView}/></main>;
 }
