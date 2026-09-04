@@ -141,6 +141,7 @@ create trigger daily_notes_touch before update on public.daily_notes for each ro
 create function public.handle_new_user() returns trigger language plpgsql security definer set search_path = '' as $$
 begin insert into public.profiles(id) values (new.id) on conflict do nothing; return new; end; $$;
 create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.peptides enable row level security;
