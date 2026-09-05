@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { DoseLog, MixGroupSchedule, Peptide, PeptimeStore, ScheduleFrequency } from "@/lib/types";
+import type { DailyTagId, DoseLog, MixGroupSchedule, Peptide, PeptimeStore, ScheduleFrequency } from "@/lib/types";
 import { groupKey } from "@/lib/schedule";
 import { effectiveLogDate } from "@/lib/log-day";
 
@@ -35,6 +35,7 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
     peptides,
     mixGroups: (store.mixGroups ?? []).map(group => ({ ...group, weekdays: group.weekdays ?? [], paused: group.paused ?? false })),
     logs,
+    dailyNotes: (store.dailyNotes ?? []).map(note => ({ ...note, tags: note.tags ?? [] })),
     todayAdditions: store.todayAdditions ?? [],
     settings: { ...store.settings, massDisplayUnit: store.settings.massDisplayUnit === "mg" ? "mg" : "mcg", dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
   };
@@ -180,7 +181,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     peptides,
     mixGroups,
     logs,
-    dailyNotes: noteRows.map(row => ({ date: row.note_date, note: row.note })),
+    dailyNotes: noteRows.map(row => ({ date: row.note_date, note: row.note, tags: (row.tags ?? []) as DailyTagId[] })),
     todayAdditions: [],
     settings: {
       syringe: profile?.syringe_type === "U-100 0.5 ml" ? "U-100 0.5 ml" : "U-100 1 ml",
@@ -247,7 +248,11 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
   } else {
     results.push(await client.from("dose_logs").delete().eq("user_id", userId));
   }
-  if (store.dailyNotes.length) results.push(await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" }));
+  if (store.dailyNotes.length) {
+    let noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
+    if (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703") noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" });
+    results.push(noteResult);
+  }
   const error = results.find(result => result.error)?.error;
   if (error) throw error;
   return store;

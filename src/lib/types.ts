@@ -70,7 +70,8 @@ export interface DoseLog {
   note: string;
 }
 
-export interface DailyNote { date: string; note: string }
+export type DailyTagId = "great_sleep" | "flushing" | "high_energy" | "headache" | "site_soreness";
+export interface DailyNote { date: string; note: string; tags: DailyTagId[] }
 export interface AppSettings {
   syringe: "U-100 1 ml" | "U-100 0.5 ml";
   massDisplayUnit: "mcg" | "mg";

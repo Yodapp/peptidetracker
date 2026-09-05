@@ -30,15 +30,15 @@
   --input: var(--border); --ring: oklch(.51 .064 177); --radius: .9rem;
 }
 .dark {
-  --background: oklch(.165 .012 65); --foreground: oklch(.94 .009 82);
-  --card: oklch(.205 .014 65); --card-foreground: var(--foreground);
-  --popover: oklch(.205 .014 65); --popover-foreground: var(--foreground);
-  --primary: oklch(.69 .065 176); --primary-foreground: oklch(.16 .018 175);
-  --secondary: oklch(.25 .014 66); --secondary-foreground: var(--foreground);
-  --muted: oklch(.245 .013 66); --muted-foreground: oklch(.69 .015 76);
-  --accent: oklch(.28 .04 176); --accent-foreground: oklch(.79 .06 176);
-  --destructive: oklch(.66 .16 27); --border: oklch(.31 .014 67);
-  --input: oklch(.32 .014 67); --ring: oklch(.66 .06 176);
+  --background: #000000; --foreground: #f4f4f5;
+  --card: rgba(24, 24, 27, .78); --card-foreground: var(--foreground);
+  --popover: #09090b; --popover-foreground: var(--foreground);
+  --primary: #72b7aa; --primary-foreground: #031310;
+  --secondary: rgba(39, 39, 42, .78); --secondary-foreground: var(--foreground);
+  --muted: rgba(39, 39, 42, .68); --muted-foreground: #a1a1aa;
+  --accent: #102d28; --accent-foreground: #91cbbf;
+  --destructive: #f87171; --border: rgba(255, 255, 255, .08);
+  --input: rgba(255, 255, 255, .11); --ring: #72b7aa;
 }
 @layer base {
   * { @apply border-border outline-ring/50; }
@@ -46,4 +46,5 @@
   html.dark { color-scheme: dark; }
   body { @apply bg-background text-foreground; font-feature-settings: "tnum" 1, "ss01" 1; }
   button, input, textarea, select { @apply touch-manipulation; }
+  ::selection { background: color-mix(in srgb, var(--primary) 35%, transparent); }
 }

@@ -120,6 +120,7 @@ create table public.daily_notes (
   user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
   note_date date not null,
   note text not null default '',
+  tags text[] not null default '{}'::text[],
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(user_id, note_date)
