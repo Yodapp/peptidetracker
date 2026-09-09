@@ -25,6 +25,12 @@ export function previousDate(date: string) {
   return value.toISOString().slice(0, 10);
 }
 
+export function addDays(date: string, days: number) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
 export function logScheduledDate(log: { takenAt: string; scheduledDate?: string }, boundaryHour = 4) {
   return log.scheduledDate ?? effectiveLogDate(log.takenAt, boundaryHour);
 }

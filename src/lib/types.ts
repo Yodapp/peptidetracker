@@ -72,6 +72,29 @@ export interface DoseLog {
 
 export type DailyTagId = "great_sleep" | "flushing" | "high_energy" | "headache" | "site_soreness";
 export interface DailyNote { date: string; note: string; tags: DailyTagId[] }
+
+export type PurchaseFrequency = "daily" | "every_n_days" | "times_per_week";
+
+export interface PurchasePlanItem {
+  id: string;
+  name: string;
+  vialMg: number;
+  doseMcg: number;
+  doseEntryUnit: "mcg" | "mg";
+  frequency: PurchaseFrequency;
+  everyNDays: number;
+  timesPerWeek: number;
+  bacWaterMl: number;
+}
+
+export interface PurchasePlan {
+  id: string;
+  name: string;
+  items: PurchasePlanItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppSettings {
   syringe: "U-100 1 ml" | "U-100 0.5 ml";
   massDisplayUnit: "mcg" | "mg";
@@ -87,6 +110,7 @@ export interface PeptimeStore {
   mixGroups: MixGroupSchedule[];
   logs: DoseLog[];
   dailyNotes: DailyNote[];
+  purchasePlans: PurchasePlan[];
   todayAdditions: string[];
   settings: AppSettings;
   onboardingComplete: boolean;

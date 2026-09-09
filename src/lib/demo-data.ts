@@ -14,6 +14,7 @@ export const initialStore: PeptimeStore = {
   mixGroups: [{ name: "evening-mix", slot: "evening", time: "21:00", frequency: "daily", weekdays: [0,1,2,3,4,5,6], paused: false }],
   logs: [],
   dailyNotes: [],
+  purchasePlans: [],
   todayAdditions: [],
   settings: { syringe: "U-100 1 ml", massDisplayUnit: "mcg", timezone: "Europe/Stockholm", language: "sv", theme: "dark", dayBoundaryHour: 4, remindersEnabled: false },
   onboardingComplete: false,

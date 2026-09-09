@@ -16,6 +16,8 @@ Peptime is a private, mobile-first peptide research logger. The interface is Swe
 - Separate scheduled day and actual timestamp: unfinished doses from yesterday remain available until 12:00 while a late log keeps its real time
 - Editable scheduled day and actual time in Logg, with the same scheduled-day grouping in Kalender and exports
 - Case-insensitive mix groups with suggestions from existing groups
+- Named purchase plans with 30/60-day vial and BAC totals, automatic mcg/mg conversion, U-100 math, and PNG sharing
+- Schedule-aware low-inventory warning when an active peptide has about 15 days or less remaining
 
 No doses or protocols in the example data are recommendations. They are UI demonstration rows only and are labeled as examples in the app.
 
@@ -33,7 +35,7 @@ Open `http://localhost:3000`. Without Supabase environment variables, Peptime ru
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql). This creates `profiles`, `peptides`, `vials`, `schedules`, `dose_logs`, and `daily_notes`, enables Row Level Security, and adds policies where `user_id = auth.uid()`.
+2. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql). This creates `profiles`, `peptides`, `vials`, `schedules`, `dose_logs`, `daily_notes`, and `purchase_plans`, enables Row Level Security, and adds per-user policies.
 3. In **Authentication → URL Configuration**, set the Site URL and add both local and production callback URLs:
    - `http://localhost:3000/auth/callback`
    - `https://YOUR_VERCEL_DOMAIN/auth/callback`
@@ -59,8 +61,12 @@ Run these migrations once, in order, in Supabase SQL Editor before deploying thi
 2. [`supabase/migrations/202609010002_group_schedules_and_reminders.sql`](supabase/migrations/202609010002_group_schedules_and_reminders.sql)
 3. [`supabase/migrations/202609030001_scheduled_log_date.sql`](supabase/migrations/202609030001_scheduled_log_date.sql)
 4. [`supabase/migrations/202609040001_mass_display_unit.sql`](supabase/migrations/202609040001_mass_display_unit.sql)
+5. [`supabase/migrations/202609040002_revoke_handle_new_user_execute.sql`](supabase/migrations/202609040002_revoke_handle_new_user_execute.sql)
+6. [`supabase/migrations/202609040003_revoke_rls_auto_enable_execute.sql`](supabase/migrations/202609040003_revoke_rls_auto_enable_execute.sql)
+7. [`supabase/migrations/20260905100517_daily_note_tags.sql`](supabase/migrations/20260905100517_daily_note_tags.sql)
+8. [`supabase/migrations/20260909094444_purchase_plans_and_vial_remaining.sql`](supabase/migrations/20260909094444_purchase_plans_and_vial_remaining.sql)
 
-The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary. The fourth syncs the user's mcg/mg display preference for the per-IU comparison.
+The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary. The fourth syncs the user's mcg/mg display preference. The final migration separates vial size from remaining inventory and adds RLS-protected saved purchase plans.
 
 On the first signed-in load after upgrading, Peptime uploads existing browser data if the remote account is empty. It also merges locally added peptides if another device reached the account first.
 

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { DailyTagId, DoseLog, MixGroupSchedule, Peptide, PeptimeStore, ScheduleFrequency } from "@/lib/types";
+import type { DailyTagId, DoseLog, MixGroupSchedule, Peptide, PeptimeStore, PurchasePlanItem, ScheduleFrequency } from "@/lib/types";
 import { groupKey } from "@/lib/schedule";
 import { effectiveLogDate } from "@/lib/log-day";
 
@@ -9,6 +9,28 @@ function uuid() { return crypto.randomUUID(); }
 function number(value: unknown, fallback = 0) { const result = Number(value); return Number.isFinite(result) ? result : fallback; }
 function text(value: unknown, fallback = "") { return typeof value === "string" ? value : fallback; }
 function optionalText(value: unknown) { const result = text(value).trim(); return result || undefined; }
+
+function purchaseItems(value: unknown): PurchasePlanItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(raw => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const name = text(item.name).trim();
+    if (!name) return [];
+    const frequency = item.frequency === "every_n_days" ? "every_n_days" : item.frequency === "times_per_week" ? "times_per_week" : "daily";
+    return [{
+      id: uuidPattern.test(text(item.id)) ? text(item.id) : uuid(),
+      name,
+      vialMg: Math.max(0, number(item.vialMg)),
+      doseMcg: Math.max(0, number(item.doseMcg)),
+      doseEntryUnit: item.doseEntryUnit === "mg" ? "mg" as const : "mcg" as const,
+      frequency,
+      everyNDays: Math.max(2, number(item.everyNDays, 2)),
+      timesPerWeek: Math.min(7, Math.max(1, number(item.timesPerWeek, 1))),
+      bacWaterMl: Math.max(0, number(item.bacWaterMl)),
+    }];
+  });
+}
 
 export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
   const dayBoundaryHour = store.settings.dayBoundaryHour ?? 4;
@@ -36,6 +58,7 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
     mixGroups: (store.mixGroups ?? []).map(group => ({ ...group, weekdays: group.weekdays ?? [], paused: group.paused ?? false })),
     logs,
     dailyNotes: (store.dailyNotes ?? []).map(note => ({ ...note, tags: note.tags ?? [] })),
+    purchasePlans: (store.purchasePlans ?? []).map(plan => ({ ...plan, id: uuidPattern.test(plan.id) ? plan.id : uuid(), items: purchaseItems(plan.items), createdAt: plan.createdAt ?? new Date().toISOString(), updatedAt: plan.updatedAt ?? new Date().toISOString() })),
     todayAdditions: store.todayAdditions ?? [],
     settings: { ...store.settings, massDisplayUnit: store.settings.massDisplayUnit === "mg" ? "mg" : "mcg", dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
   };
@@ -57,19 +80,21 @@ export function mergeStores(remote: PeptimeStore, local: PeptimeStore) {
     .filter(log => [...remote.peptides, ...additions].some(peptide => peptide.id === log.peptideId));
   const notes = new Map(local.dailyNotes.map(note => [note.date, note]));
   remote.dailyNotes.forEach(note => notes.set(note.date, note));
+  const remotePlanIds = new Set(remote.purchasePlans.map(plan => plan.id));
   return {
     ...remote,
     peptides: [...remote.peptides, ...additions],
     mixGroups: [...new Map([...local.mixGroups, ...remote.mixGroups].map(group => [groupKey(group.name), group])).values()],
     logs: [...remote.logs, ...localLogs],
     dailyNotes: [...notes.values()],
+    purchasePlans: [...remote.purchasePlans, ...local.purchasePlans.filter(plan => !remotePlanIds.has(plan.id))],
     todayAdditions: [...new Set([...remote.todayAdditions, ...local.todayAdditions])],
     onboardingComplete: remote.onboardingComplete || local.onboardingComplete,
   };
 }
 
 export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeStore) {
-  const [profileResult, peptideResult, vialResult, scheduleResult, mixGroupResult, logResult, noteResult] = await Promise.all([
+  const [profileResult, peptideResult, vialResult, scheduleResult, mixGroupResult, logResult, noteResult, purchasePlanResult] = await Promise.all([
     client.from("profiles").select("*").maybeSingle(),
     client.from("peptides").select("*").order("created_at"),
     client.from("vials").select("*").is("closed_at", null),
@@ -77,9 +102,11 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     client.from("mix_groups").select("*").eq("active", true),
     client.from("dose_logs").select("*").order("taken_at", { ascending: false }),
     client.from("daily_notes").select("*").order("note_date", { ascending: false }),
+    client.from("purchase_plans").select("*").order("updated_at", { ascending: false }),
   ]);
   const missingMixGroups = mixGroupResult.error?.code === "PGRST205" || mixGroupResult.error?.code === "42P01";
-  const error = [profileResult, peptideResult, vialResult, scheduleResult, logResult, noteResult].find(result => result.error)?.error ?? (missingMixGroups ? null : mixGroupResult.error);
+  const missingPurchasePlans = purchasePlanResult.error?.code === "PGRST205" || purchasePlanResult.error?.code === "42P01";
+  const error = [profileResult, peptideResult, vialResult, scheduleResult, logResult, noteResult].find(result => result.error)?.error ?? (missingMixGroups ? null : mixGroupResult.error) ?? (missingPurchasePlans ? null : purchasePlanResult.error);
   if (error) throw error;
 
   const profile = profileResult.data;
@@ -89,6 +116,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
   const mixGroupRows = missingMixGroups ? [] : (mixGroupResult.data ?? []);
   const logRows = logResult.data ?? [];
   const noteRows = noteResult.data ?? [];
+  const purchasePlanRows = missingPurchasePlans ? [] : (purchasePlanResult.data ?? []);
   const vials = new Map(vialRows.map(row => [row.peptide_id, row]));
   const schedules = new Map(scheduleRows.map(row => [row.peptide_id, row]));
   const usedMg = new Map<string, number>();
@@ -101,7 +129,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
   const peptides: Peptide[] = peptideRows.map(row => {
     const vial = vials.get(row.id);
     const schedule = schedules.get(row.id);
-    const vialMg = number(vial?.initial_mg, number(row.vial_mg, 1));
+    const vialMg = number(row.vial_mg, number(vial?.initial_mg, 1));
     const frequency: ScheduleFrequency = schedule?.frequency === "selected_weekdays" ? "weekdays" : schedule?.frequency === "every_n_days" ? "every_n_days" : schedule?.frequency === "as_needed" ? "as_needed" : "daily";
     return {
       id: row.id,
@@ -111,7 +139,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
       doseMcg: row.dose_unit === "mg" ? number(row.dose_amount) * 1000 : number(row.dose_amount),
       vialMg,
       waterMl: number(vial?.bac_water_ml, number(row.bac_water_ml, 1)),
-      remainingMg: Math.max(0, vialMg - (usedMg.get(row.id) ?? 0)),
+      remainingMg: Math.max(0, number(vial?.remaining_mg, vialMg - (usedMg.get(row.id) ?? 0))),
       route: row.route,
       slot: schedule?.slot ?? "as_needed",
       time: text(schedule?.clock_time, "00:00").slice(0, 5),
@@ -182,6 +210,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     mixGroups,
     logs,
     dailyNotes: noteRows.map(row => ({ date: row.note_date, note: row.note, tags: (row.tags ?? []) as DailyTagId[] })),
+    purchasePlans: purchasePlanRows.map(row => ({ id: row.id, name: row.name, items: purchaseItems(row.items), createdAt: row.created_at, updatedAt: row.updated_at })),
     todayAdditions: [],
     settings: {
       syringe: profile?.syringe_type === "U-100 0.5 ml" ? "U-100 0.5 ml" : "U-100 1 ml",
@@ -194,7 +223,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     },
     onboardingComplete: Boolean(profile?.onboarding_complete),
   };
-  const hasData = Boolean(profile?.onboarding_complete || peptideRows.length || logRows.length || noteRows.length);
+  const hasData = Boolean(profile?.onboarding_complete || peptideRows.length || logRows.length || noteRows.length || purchasePlanRows.length);
   return { store: hasData ? store : normalizeStoreIds(fallback), hasData };
 }
 
@@ -221,7 +250,10 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
   }
   if (store.peptides.length) {
     results.push(await client.from("peptides").upsert(store.peptides.map(peptide => ({ id: peptide.id, user_id: userId, name: peptide.name, short_code: peptide.shortCode, color: peptide.color, dose_amount: peptide.doseMcg, dose_unit: "mcg", vial_mg: peptide.vialMg, bac_water_ml: peptide.waterMl, route: peptide.route, fasted: peptide.fasted, fasted_note: peptide.fastedNote, mix_group_id: peptide.mixGroupId ?? null, cycle_start: peptide.mixGroupId ? null : peptide.cycleStart ?? null, weeks_on: peptide.mixGroupId ? null : peptide.weeksOn ?? null, weeks_off: peptide.mixGroupId ? null : peptide.weeksOff ?? null, default_sites: peptide.sites, last_site: peptide.lastSite ?? null, notes: peptide.notes, archived_at: peptide.archived ? new Date().toISOString() : null, is_example: peptide.example })), { onConflict: "id" }));
-    results.push(await client.from("vials").upsert(store.peptides.map(peptide => ({ id: peptide.id, user_id: userId, peptide_id: peptide.id, initial_mg: peptide.remainingMg + (usedMg.get(peptide.id) ?? 0), bac_water_ml: peptide.waterMl, reconstituted_at: peptide.reconstitutedAt ?? null, beyond_use_days: peptide.beyondUseDays, opened_at: peptide.reconstitutedAt ?? new Date().toISOString(), closed_at: null })), { onConflict: "id" }));
+    const vialBase = (peptide: Peptide) => ({ id: peptide.id, user_id: userId, peptide_id: peptide.id, bac_water_ml: peptide.waterMl, reconstituted_at: peptide.reconstitutedAt ?? null, beyond_use_days: peptide.beyondUseDays, ...(peptide.reconstitutedAt ? { opened_at: peptide.reconstitutedAt } : {}), closed_at: null });
+    let vialResult = await client.from("vials").upsert(store.peptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.vialMg, remaining_mg: peptide.remainingMg })), { onConflict: "id" });
+    if (vialResult.error?.code === "PGRST204" || vialResult.error?.code === "42703") vialResult = await client.from("vials").upsert(store.peptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.remainingMg + (usedMg.get(peptide.id) ?? 0) })), { onConflict: "id" });
+    results.push(vialResult);
     const standalone = mixGroupsSupported ? store.peptides.filter(peptide => !peptide.mixGroupId) : store.peptides;
     const groupedIds = store.peptides.filter(peptide => peptide.mixGroupId).map(peptide => peptide.id);
     if (standalone.length) {
@@ -252,6 +284,24 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
     let noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
     if (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703") noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" });
     results.push(noteResult);
+  }
+  if (store.purchasePlans.length) {
+    const planResult = await client.from("purchase_plans").upsert(store.purchasePlans.map(plan => ({ id: plan.id, user_id: userId, name: plan.name, items: plan.items, created_at: plan.createdAt, updated_at: plan.updatedAt })), { onConflict: "id" });
+    if (planResult.error?.code !== "PGRST205" && planResult.error?.code !== "42P01") {
+      results.push(planResult);
+      if (!planResult.error) {
+        const existingResult = await client.from("purchase_plans").select("id").eq("user_id", userId);
+        results.push(existingResult);
+        if (!existingResult.error) {
+          const localIds = new Set(store.purchasePlans.map(plan => plan.id));
+          const staleIds = (existingResult.data ?? []).map(row => row.id).filter(id => !localIds.has(id));
+          if (staleIds.length) results.push(await client.from("purchase_plans").delete().in("id", staleIds));
+        }
+      }
+    }
+  } else {
+    const deletePlansResult = await client.from("purchase_plans").delete().eq("user_id", userId);
+    if (deletePlansResult.error?.code !== "PGRST205" && deletePlansResult.error?.code !== "42P01") results.push(deletePlansResult);
   }
   const error = results.find(result => result.error)?.error;
   if (error) throw error;

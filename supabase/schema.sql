@@ -50,6 +50,7 @@ create table public.vials (
   user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
   peptide_id uuid not null references public.peptides(id) on delete cascade,
   initial_mg numeric(12,4) not null check (initial_mg > 0),
+  remaining_mg numeric(12,4) check (remaining_mg >= 0),
   bac_water_ml numeric(12,4) not null check (bac_water_ml > 0),
   reconstituted_at timestamptz,
   beyond_use_days integer not null default 28 check (beyond_use_days >= 0),
@@ -126,9 +127,19 @@ create table public.daily_notes (
   unique(user_id, note_date)
 );
 
+create table public.purchase_plans (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  name text not null check (char_length(trim(name)) between 1 and 100),
+  items jsonb not null default '[]'::jsonb check (jsonb_typeof(items) = 'array'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index dose_logs_user_taken_idx on public.dose_logs(user_id, taken_at desc);
 create index schedules_user_active_idx on public.schedules(user_id, active);
 create index peptides_user_active_idx on public.peptides(user_id, archived_at);
+create index purchase_plans_user_updated_idx on public.purchase_plans(user_id, updated_at desc);
 
 create function public.touch_updated_at() returns trigger language plpgsql security invoker set search_path = '' as $$
 begin new.updated_at = now(); return new; end; $$;
@@ -138,6 +149,7 @@ create trigger schedules_touch before update on public.schedules for each row ex
 create trigger mix_groups_touch before update on public.mix_groups for each row execute function public.touch_updated_at();
 create trigger dose_logs_touch before update on public.dose_logs for each row execute function public.touch_updated_at();
 create trigger daily_notes_touch before update on public.daily_notes for each row execute function public.touch_updated_at();
+create trigger purchase_plans_touch before update on public.purchase_plans for each row execute function public.touch_updated_at();
 
 create function public.handle_new_user() returns trigger language plpgsql security definer set search_path = '' as $$
 begin insert into public.profiles(id) values (new.id) on conflict do nothing; return new; end; $$;
@@ -151,6 +163,7 @@ alter table public.schedules enable row level security;
 alter table public.mix_groups enable row level security;
 alter table public.dose_logs enable row level security;
 alter table public.daily_notes enable row level security;
+alter table public.purchase_plans enable row level security;
 
 create policy "own profile" on public.profiles for all using (id = auth.uid()) with check (id = auth.uid());
 create policy "own peptides" on public.peptides for all using (user_id = auth.uid()) with check (user_id = auth.uid());
@@ -159,6 +172,7 @@ create policy "own schedules" on public.schedules for all using (user_id = auth.
 create policy "own mix groups" on public.mix_groups for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own logs" on public.dose_logs for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own daily notes" on public.daily_notes for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "own purchase plans" on public.purchase_plans for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 grant usage on schema public to authenticated;
-grant select, insert, update, delete on public.profiles, public.peptides, public.vials, public.schedules, public.mix_groups, public.dose_logs, public.daily_notes to authenticated;
+grant select, insert, update, delete on public.profiles, public.peptides, public.vials, public.schedules, public.mix_groups, public.dose_logs, public.daily_notes, public.purchase_plans to authenticated;
