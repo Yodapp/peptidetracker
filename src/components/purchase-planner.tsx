@@ -30,6 +30,17 @@ function wholeIuOption(item: PurchasePlanItem) {
   return { targetIu, waterMl: (targetIu * item.vialMg * 10) / item.doseMcg };
 }
 
+function frequencyLabel(item: PurchasePlanItem) {
+  if (item.frequency === "every_n_days") return `Var ${item.everyNDays}:e dag`;
+  if (item.frequency === "times_per_week") return `${item.timesPerWeek} dagar per vecka`;
+  return "Varje dag";
+}
+
+function doseLabel(item: PurchasePlanItem) {
+  const mg = item.doseMcg / 1000;
+  return item.doseEntryUnit === "mg" ? `${n(mg, 4)} mg (${n(item.doseMcg)} mcg)` : `${n(item.doseMcg)} mcg (${n(mg, 4)} mg)`;
+}
+
 function downloadBlob(blob: Blob, name: string) {
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(blob);
@@ -41,7 +52,7 @@ function downloadBlob(blob: Blob, name: string) {
 async function exportPlanImage(plan: PurchasePlan) {
   const validItems = plan.items.filter(item => item.name.trim() && item.vialMg > 0 && item.doseMcg > 0);
   const width = 1200;
-  const height = 390 + validItems.length * 150;
+  const height = 390 + validItems.length * 170;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -68,8 +79,11 @@ async function exportPlanImage(plan: PurchasePlan) {
     context.font = "600 30px Inter, system-ui, sans-serif";
     context.fillText(item.name, 72, y, 420);
     context.fillStyle = "#a1a1aa";
-    context.font = "22px Inter, system-ui, sans-serif";
-    context.fillText(`${n(item.doseMcg)} mcg · ${n(item.doseMcg / 1000, 4)} mg · ${n(planDoseIu(item))} IU`, 72, y + 42, 460);
+    context.font = "600 22px Inter, system-ui, sans-serif";
+    context.fillText(`Dos: ${doseLabel(item)} · ${n(planDoseIu(item))} IU`, 72, y + 42, 470);
+    context.fillStyle = "#71717a";
+    context.font = "20px Inter, system-ui, sans-serif";
+    context.fillText(frequencyLabel(item), 72, y + 76, 460);
     context.fillStyle = "#f4f4f5";
     context.font = "600 28px ui-monospace, monospace";
     context.fillText(`${month.vials} vial${month.vials === 1 ? "" : "er"}`, 610, y);
@@ -78,7 +92,7 @@ async function exportPlanImage(plan: PurchasePlan) {
     context.font = "20px Inter, system-ui, sans-serif";
     context.fillText(`30 dagar · ${n(month.bacWaterMl)} ml BAC`, 610, y + 42);
     context.fillText(`60 dagar · ${n(twoMonths.bacWaterMl)} ml BAC`, 910, y + 42);
-    y += 150;
+    y += 170;
   });
   const monthBac = validItems.reduce((sum, item) => sum + projectPurchase(item, 30).bacWaterMl, 0);
   const twoMonthBac = validItems.reduce((sum, item) => sum + projectPurchase(item, 60).bacWaterMl, 0);
