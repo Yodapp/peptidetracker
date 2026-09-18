@@ -12,6 +12,7 @@ Peptime is a private, mobile-first peptide research logger. The interface is Swe
 - Compact per-IU mass comparison on Today, selectable as mcg or mg without showing both at once
 - Supabase-backed cross-device storage with local cache, installable PWA shell, light/dark mode, and daily autosave note
 - History with filters and edit/delete, peptide/vial editor and archive, monthly calendar, CSV/JSON export
+- Injection-site body map showing per-site history; per-peptide dose charts and an Insights view with activity, weekly totals, and daily tags
 - Supabase email magic-link authentication with an in-PWA email-code fallback and RLS on every user table
 - Separate scheduled day and actual timestamp: unfinished doses from yesterday remain available until 12:00 while a late log keeps its real time
 - Editable scheduled day and actual time in Logg, with the same scheduled-day grouping in Kalender and exports
