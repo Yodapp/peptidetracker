@@ -60,7 +60,7 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
     dailyNotes: (store.dailyNotes ?? []).map(note => ({ ...note, tags: note.tags ?? [] })),
     purchasePlans: (store.purchasePlans ?? []).map(plan => ({ ...plan, id: uuidPattern.test(plan.id) ? plan.id : uuid(), items: purchaseItems(plan.items), createdAt: plan.createdAt ?? new Date().toISOString(), updatedAt: plan.updatedAt ?? new Date().toISOString() })),
     todayAdditions: store.todayAdditions ?? [],
-    settings: { ...store.settings, customDailyTags: store.settings.customDailyTags ?? [], massDisplayUnit: store.settings.massDisplayUnit === "mg" ? "mg" : "mcg", dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
+    settings: { ...store.settings, customDailyTags: store.settings.customDailyTags ?? [], themeMode: store.settings.themeMode ?? "system", massDisplayUnit: store.settings.massDisplayUnit === "mg" ? "mg" : "mcg", dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
   };
 }
 
@@ -220,6 +220,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
       timezone: profile?.timezone ?? "Europe/Stockholm",
       language: profile?.language === "en" ? "en" : "sv",
       theme: profile?.theme === "light" ? "light" : "dark",
+      themeMode: fallback.settings.themeMode ?? "system",
       dayBoundaryHour: number(profile?.day_boundary_hour, 4),
       remindersEnabled: Boolean(profile?.reminders_enabled),
     },

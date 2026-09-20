@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowLeft, Download, Plus, Save, ShoppingCart, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/peptime-ui";
 import type { Peptide, PurchasePlan, PurchasePlanItem } from "@/lib/types";
 import { planDoseIu, projectPurchase } from "@/lib/purchase-plan";
 
@@ -136,7 +137,7 @@ export function PurchasePlanner({ peptides, plans, onChange, onBack }: { peptide
     setDraft(next[0] ? clonePlan(next[0]) : emptyPlan());
   };
   return <>
-    <header className="sticky top-0 z-20 -mx-5 mb-6 flex min-h-[86px] items-end gap-3 border-b border-border/40 bg-background/80 px-5 pb-3 pt-6 backdrop-blur-[20px] sm:-mx-6 sm:px-6"><Button type="button" variant="ghost" size="icon" className="-ml-2 size-11 rounded-full" onClick={onBack} aria-label="Tillbaka till Peptider"><ArrowLeft/></Button><div><p className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-accent-foreground">Planera framåt</p><h1 className="text-[30px] font-medium tracking-[-0.045em]">Inköpsplan</h1></div></header>
+    <PageHeader eyebrow="Planera framåt" title="Inköpsplan" action={<Button type="button" variant="ghost" size="icon" className="size-11 rounded-full" onClick={onBack} aria-label="Tillbaka till Peptider"><ArrowLeft/></Button>}/>
     <CardBlock className="mb-5 p-4"><div className="flex items-start gap-3"><ShoppingCart className="mt-0.5 size-5 shrink-0 text-primary"/><div><p className="font-medium">30 och 60 dagar</p><p className="mt-1 text-sm leading-5 text-muted-foreground">Peptime räknar antal hela vialer och total BAC-mängd från värdena du anger.</p></div></div></CardBlock>
     <div className="mb-5 grid grid-cols-[1fr_auto] gap-2"><select aria-label="Ladda sparad plan" className="h-11 min-w-0 rounded-xl border bg-card px-3 text-sm" value={plans.some(plan => plan.id === draft.id) ? draft.id : ""} onChange={event => { const plan = plans.find(value => value.id === event.target.value); if (plan) setDraft(clonePlan(plan)); }}><option value="">Ny, osparad plan</option>{plans.map(plan => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select><Button type="button" variant="outline" className="h-11 px-3" onClick={() => setDraft(emptyPlan())}><Plus/> Ny</Button></div>
     <label className="mb-5 block text-xs text-muted-foreground">Planens namn<Input className="mt-1.5 h-12 text-base" value={draft.name} onChange={event => setDraft(plan => ({ ...plan, name: event.target.value }))}/></label>
@@ -162,7 +163,7 @@ export function PurchasePlanner({ peptides, plans, onChange, onBack }: { peptide
 }
 
 function CardBlock({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`rounded-[20px] border border-border bg-card shadow-[0_16px_50px_rgba(0,0,0,.18)] ${className}`}>{children}</div>;
+  return <div className={`rounded-[20px] border border-border bg-card shadow-[0_1px_2px_rgba(0,0,0,.025)] ${className}`}>{children}</div>;
 }
 
 function Projection({ label, vials, bac, doses }: { label: string; vials: number; bac: number; doses: number }) {

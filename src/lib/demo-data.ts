@@ -16,6 +16,6 @@ export const initialStore: PeptimeStore = {
   dailyNotes: [],
   purchasePlans: [],
   todayAdditions: [],
-  settings: { syringe: "U-100 1 ml", customDailyTags: [], massDisplayUnit: "mcg", timezone: "Europe/Stockholm", language: "sv", theme: "dark", dayBoundaryHour: 4, remindersEnabled: false },
+  settings: { syringe: "U-100 1 ml", customDailyTags: [], massDisplayUnit: "mcg", timezone: "Europe/Stockholm", language: "sv", theme: "dark", themeMode: "system", dayBoundaryHour: 4, remindersEnabled: false },
   onboardingComplete: false,
 };

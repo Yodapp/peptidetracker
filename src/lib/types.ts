@@ -111,6 +111,7 @@ export interface AppSettings {
   timezone: string;
   language: "sv" | "en";
   theme: "dark" | "light";
+  themeMode: "system" | "dark" | "light";
   dayBoundaryHour: number;
   remindersEnabled: boolean;
 }
