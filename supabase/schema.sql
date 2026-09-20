@@ -14,6 +14,7 @@ create table public.profiles (
   mass_display_unit text not null default 'mcg' check (mass_display_unit in ('mcg','mg')),
   day_boundary_hour smallint not null default 4 check (day_boundary_hour between 0 and 8),
   reminders_enabled boolean not null default false,
+  custom_daily_tags text[] not null default '{}'::text[],
   onboarding_complete boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -122,6 +123,10 @@ create table public.daily_notes (
   note_date date not null,
   note text not null default '',
   tags text[] not null default '{}'::text[],
+  sleep_quality smallint check (sleep_quality between 1 and 5),
+  brain_fatigue smallint check (brain_fatigue between 1 and 5),
+  physical_fatigue smallint check (physical_fatigue between 1 and 5),
+  activity_level smallint check (activity_level between 1 and 5),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(user_id, note_date)

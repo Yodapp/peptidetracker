@@ -60,7 +60,7 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
     dailyNotes: (store.dailyNotes ?? []).map(note => ({ ...note, tags: note.tags ?? [] })),
     purchasePlans: (store.purchasePlans ?? []).map(plan => ({ ...plan, id: uuidPattern.test(plan.id) ? plan.id : uuid(), items: purchaseItems(plan.items), createdAt: plan.createdAt ?? new Date().toISOString(), updatedAt: plan.updatedAt ?? new Date().toISOString() })),
     todayAdditions: store.todayAdditions ?? [],
-    settings: { ...store.settings, massDisplayUnit: store.settings.massDisplayUnit === "mg" ? "mg" : "mcg", dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
+    settings: { ...store.settings, customDailyTags: store.settings.customDailyTags ?? [], massDisplayUnit: store.settings.massDisplayUnit === "mg" ? "mg" : "mcg", dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
   };
 }
 
@@ -89,6 +89,7 @@ export function mergeStores(remote: PeptimeStore, local: PeptimeStore) {
     dailyNotes: [...notes.values()],
     purchasePlans: [...remote.purchasePlans, ...local.purchasePlans.filter(plan => !remotePlanIds.has(plan.id))],
     todayAdditions: [...new Set([...remote.todayAdditions, ...local.todayAdditions])],
+    settings: { ...remote.settings, customDailyTags: [...new Set([...(local.settings.customDailyTags ?? []), ...(remote.settings.customDailyTags ?? [])])] },
     onboardingComplete: remote.onboardingComplete || local.onboardingComplete,
   };
 }
@@ -209,11 +210,12 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     peptides,
     mixGroups,
     logs,
-    dailyNotes: noteRows.map(row => ({ date: row.note_date, note: row.note, tags: (row.tags ?? []) as DailyTagId[] })),
+    dailyNotes: noteRows.map(row => ({ date: row.note_date, note: row.note, tags: (row.tags ?? []) as DailyTagId[], sleepQuality: row.sleep_quality ?? undefined, brainFatigue: row.brain_fatigue ?? undefined, physicalFatigue: row.physical_fatigue ?? undefined, activityLevel: row.activity_level ?? undefined })),
     purchasePlans: purchasePlanRows.map(row => ({ id: row.id, name: row.name, items: purchaseItems(row.items), createdAt: row.created_at, updatedAt: row.updated_at })),
     todayAdditions: [],
     settings: {
-      syringe: profile?.syringe_type === "U-100 0.5 ml" ? "U-100 0.5 ml" : "U-100 1 ml",
+      syringe: profile?.syringe_type === "U-100 0.3 ml" ? "U-100 0.3 ml" : profile?.syringe_type === "U-100 0.5 ml" ? "U-100 0.5 ml" : "U-100 1 ml",
+      customDailyTags: Array.isArray(profile?.custom_daily_tags) ? profile.custom_daily_tags : [],
       massDisplayUnit: profile?.mass_display_unit === "mg" ? "mg" : fallback.settings.massDisplayUnit === "mg" ? "mg" : "mcg",
       timezone: profile?.timezone ?? "Europe/Stockholm",
       language: profile?.language === "en" ? "en" : "sv",
@@ -238,7 +240,8 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
   const frequency = (value: ScheduleFrequency) => value === "weekdays" ? "selected_weekdays" : value;
   const results = [];
   const profile = { id: userId, language: store.settings.language, timezone: store.settings.timezone, theme: store.settings.theme, syringe_type: store.settings.syringe, day_boundary_hour: store.settings.dayBoundaryHour, onboarding_complete: store.onboardingComplete };
-  let profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled, mass_display_unit: store.settings.massDisplayUnit }, { onConflict: "id" });
+  let profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled, mass_display_unit: store.settings.massDisplayUnit, custom_daily_tags: store.settings.customDailyTags }, { onConflict: "id" });
+  if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled, mass_display_unit: store.settings.massDisplayUnit }, { onConflict: "id" });
   if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled }, { onConflict: "id" });
   if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert(profile, { onConflict: "id" });
   results.push(profileResult);
@@ -281,7 +284,8 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
     results.push(await client.from("dose_logs").delete().eq("user_id", userId));
   }
   if (store.dailyNotes.length) {
-    let noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
+    let noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
+    if (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703") noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
     if (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703") noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" });
     results.push(noteResult);
   }

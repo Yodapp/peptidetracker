@@ -70,8 +70,17 @@ export interface DoseLog {
   note: string;
 }
 
-export type DailyTagId = "great_sleep" | "flushing" | "high_energy" | "headache" | "site_soreness";
-export interface DailyNote { date: string; note: string; tags: DailyTagId[] }
+export type DailyTagId = string;
+export type WellbeingMetric = "sleepQuality" | "brainFatigue" | "physicalFatigue" | "activityLevel";
+export interface DailyNote {
+  date: string;
+  note: string;
+  tags: DailyTagId[];
+  sleepQuality?: number;
+  brainFatigue?: number;
+  physicalFatigue?: number;
+  activityLevel?: number;
+}
 
 export type PurchaseFrequency = "daily" | "every_n_days" | "times_per_week";
 
@@ -96,7 +105,8 @@ export interface PurchasePlan {
 }
 
 export interface AppSettings {
-  syringe: "U-100 1 ml" | "U-100 0.5 ml";
+  syringe: "U-100 0.3 ml" | "U-100 0.5 ml" | "U-100 1 ml";
+  customDailyTags: string[];
   massDisplayUnit: "mcg" | "mg";
   timezone: string;
   language: "sv" | "en";
@@ -121,3 +131,5 @@ export const syringeUnits = (doseMcg: number, vialMg: number, waterMl: number) =
   if (!doseMcg || !concentration) return 0;
   return (doseMcg / (concentration * 1000)) * 100;
 };
+
+export const syringeCapacity = (syringe: AppSettings["syringe"]) => syringe === "U-100 0.3 ml" ? 30 : syringe === "U-100 0.5 ml" ? 50 : 100;
