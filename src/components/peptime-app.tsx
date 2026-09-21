@@ -28,6 +28,13 @@ const slotNames: Record<Slot, string> = { morning: "Morgon", lunch: "Lunch", eve
 const disclaimer = "Log what you want. Peptime contains no medical advice.";
 
 function uid() { return crypto.randomUUID(); }
+function syncErrorMessage(error: unknown) {
+  if (!error || typeof error !== "object") return "Okänt synkfel";
+  const value = error as { code?: unknown; message?: unknown };
+  const code = typeof value.code === "string" ? value.code : "";
+  const message = typeof value.message === "string" ? value.message : "Okänt synkfel";
+  return `${code ? `${code} · ` : ""}${message}`.slice(0, 240);
+}
 function n(value: number) { return new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 2 }).format(value); }
 function massN(value: number) { return new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 4 }).format(value); }
 function haptic() { if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(10); }
@@ -112,6 +119,7 @@ function useStore() {
   const [store, setStore] = useState<PeptimeStore>(() => normalizeStoreIds(initialStore));
   const [ready, setReady] = useState(false);
   const [syncState, setSyncState] = useState<"local" | "syncing" | "synced" | "error">("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [hydrateAttempt, setHydrateAttempt] = useState(0);
   const [saveAttempt, setSaveAttempt] = useState(0);
   const clientRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
@@ -142,6 +150,7 @@ function useStore() {
         const local = saved ? normalizeStoreIds(JSON.parse(saved)) : normalizeStoreIds(initialStore);
         cached = saved ? local : null;
         const remote = await loadRemoteStore(client, local);
+        setSyncError(null);
         let next = remote.store;
         const merged = mergeStores(remote.store, local);
         const hasLocalAdditions = merged.peptides.length > remote.store.peptides.length || merged.logs.length > remote.store.logs.length || merged.dailyNotes.length > remote.store.dailyNotes.length || merged.purchasePlans.length > remote.store.purchasePlans.length;
@@ -161,6 +170,7 @@ function useStore() {
         }
       } catch (error) {
         console.error("Peptime Supabase hydration error", error);
+        setSyncError(syncErrorMessage(error));
         clientRef.current = null;
         userIdRef.current = null;
         if (!cancelled) {
@@ -186,9 +196,10 @@ function useStore() {
     const client = clientRef.current;
     const userId = userIdRef.current;
     const timer = window.setTimeout(async () => {
-      try { setSyncState("syncing"); await saveRemoteStore(client, userId, store); saveFailures.current = 0; setSyncState("synced"); }
+      try { setSyncState("syncing"); await saveRemoteStore(client, userId, store); saveFailures.current = 0; setSyncError(null); setSyncState("synced"); }
       catch (error) {
         console.error("Peptime Supabase sync error", error);
+        setSyncError(syncErrorMessage(error));
         setSyncState("error");
         saveFailures.current += 1;
         const delay = Math.min(30000, 3000 * saveFailures.current);
@@ -201,7 +212,7 @@ function useStore() {
     if (clientRef.current && userIdRef.current && ready) setSaveAttempt(value => value + 1);
     else setHydrateAttempt(value => value + 1);
   };
-  return [store, setStore, ready, syncState, retrySync] as const;
+  return [store, setStore, ready, syncState, retrySync, syncError] as const;
 }
 
 function BottomNav({ view, setView }: { view: string; setView: (view: string) => void }) {
@@ -360,7 +371,7 @@ function CalendarView({ store, onBack }: { store: PeptimeStore; onBack: () => vo
 }
 
 export function PeptimeApp({ userEmail }: { userEmail?: string }) {
-  const [store,update,ready,syncState,retrySync]=useStore(); const [view,setView]=useState("today");
+  const [store,update,ready,syncState,retrySync,syncError]=useStore(); const [view,setView]=useState("today");
   const [insightPeptideId,setInsightPeptideId]=useState<string|null>(null);
   const [insightReturnView,setInsightReturnView]=useState<"peptides"|"insights">("peptides");
   const [calendarReturnView,setCalendarReturnView]=useState<"today"|"insights">("today");
@@ -368,7 +379,7 @@ export function PeptimeApp({ userEmail }: { userEmail?: string }) {
   const openPeptideInsights=(id:string,from:"peptides"|"insights")=>{setInsightPeptideId(id);setInsightReturnView(from);setView("peptide-insights")};
   useEffect(()=>{const media=window.matchMedia("(prefers-color-scheme: dark)");const apply=()=>{const mode=store.settings.themeMode??"system";document.documentElement.classList.toggle("dark",mode==="dark"||(mode==="system"&&media.matches))};apply();media.addEventListener("change",apply);return()=>media.removeEventListener("change",apply)},[store.settings.themeMode]);
   useEffect(()=>{if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>undefined)},[]);
-  if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><RotateCcw className="mx-auto size-7 text-muted-foreground"/><h1 className="mt-4 text-xl font-medium">Kunde inte hämta ditt konto</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p><Button className="mt-5 h-12 w-full" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
+  if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><RotateCcw className="mx-auto size-7 text-muted-foreground"/><h1 className="mt-4 text-xl font-medium">Kunde inte hämta ditt konto</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p>{syncError&&<p className="mt-3 break-words text-sm text-destructive">{syncError}</p>}<Button className="mt-5 h-12 w-full" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
   if(!store.onboardingComplete)return <Onboarding store={store} update={update}/>;
-  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="calendar"&&<CalendarView store={store} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} userEmail={userEmail}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
+  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="calendar"&&<CalendarView store={store} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
 }
