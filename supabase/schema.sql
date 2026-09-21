@@ -126,6 +126,7 @@ create table public.daily_notes (
   sleep_quality smallint check (sleep_quality between 1 and 5),
   brain_fatigue smallint check (brain_fatigue between 1 and 5),
   physical_fatigue smallint check (physical_fatigue between 1 and 5),
+  pain_level smallint check (pain_level between 1 and 5),
   activity_level smallint check (activity_level between 1 and 5),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),

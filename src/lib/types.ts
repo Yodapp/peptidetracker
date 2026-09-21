@@ -71,7 +71,7 @@ export interface DoseLog {
 }
 
 export type DailyTagId = string;
-export type WellbeingMetric = "sleepQuality" | "brainFatigue" | "physicalFatigue" | "activityLevel";
+export type WellbeingMetric = "sleepQuality" | "brainFatigue" | "physicalFatigue" | "painLevel" | "activityLevel";
 export interface DailyNote {
   date: string;
   note: string;
@@ -79,6 +79,7 @@ export interface DailyNote {
   sleepQuality?: number;
   brainFatigue?: number;
   physicalFatigue?: number;
+  painLevel?: number;
   activityLevel?: number;
 }
 

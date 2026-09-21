@@ -10,6 +10,7 @@ const metrics: { key: WellbeingMetric; label: string; low: string; high: string;
   { key: "sleepQuality", label: "Sömn", low: "Mycket dålig", high: "Mycket bra", color: "#72b7aa" },
   { key: "brainFatigue", label: "Hjärntrötthet", low: "Ingen", high: "Extrem", color: "#7f9fca" },
   { key: "physicalFatigue", label: "Fysisk trötthet", low: "Ingen", high: "Extrem", color: "#c9828b" },
+  { key: "painLevel", label: "Värk", low: "Ingen värk", high: "Mycket värk", color: "#b48a9e" },
   { key: "activityLevel", label: "Aktivitetsnivå", low: "Mycket låg", high: "Mycket hög", color: "#c4a66a" },
 ];
 

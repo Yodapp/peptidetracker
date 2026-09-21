@@ -210,7 +210,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     peptides,
     mixGroups,
     logs,
-    dailyNotes: noteRows.map(row => ({ date: row.note_date, note: row.note, tags: (row.tags ?? []) as DailyTagId[], sleepQuality: row.sleep_quality ?? undefined, brainFatigue: row.brain_fatigue ?? undefined, physicalFatigue: row.physical_fatigue ?? undefined, activityLevel: row.activity_level ?? undefined })),
+    dailyNotes: noteRows.map(row => ({ date: row.note_date, note: row.note, tags: (row.tags ?? []) as DailyTagId[], sleepQuality: row.sleep_quality ?? undefined, brainFatigue: row.brain_fatigue ?? undefined, physicalFatigue: row.physical_fatigue ?? undefined, painLevel: row.pain_level ?? undefined, activityLevel: row.activity_level ?? undefined })),
     purchasePlans: purchasePlanRows.map(row => ({ id: row.id, name: row.name, items: purchaseItems(row.items), createdAt: row.created_at, updatedAt: row.updated_at })),
     todayAdditions: [],
     settings: {
@@ -285,9 +285,11 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
     results.push(await client.from("dose_logs").delete().eq("user_id", userId));
   }
   if (store.dailyNotes.length) {
-    let noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
-    if (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703") noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
-    if (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703") noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" });
+    const hasPainValue = store.dailyNotes.some(note => note.painLevel !== undefined);
+    let noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, pain_level: note.painLevel ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
+    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
+    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
+    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" });
     results.push(noteResult);
   }
   if (store.purchasePlans.length) {
