@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { DailyTagId, DoseLog, MixGroupSchedule, Peptide, PeptimeStore, PurchasePlanItem, ScheduleFrequency } from "@/lib/types";
+import { normalizeInjectionSites, type DailyTagId, type DoseLog, type MixGroupSchedule, type Peptide, type PeptimeStore, type PurchasePlanItem, type ScheduleFrequency } from "@/lib/types";
 import { groupKey } from "@/lib/schedule";
 import { effectiveLogDate } from "@/lib/log-day";
 
@@ -46,6 +46,7 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
       weekdays: peptide.weekdays ?? [0,1,2,3,4,5,6],
       everyNDays: peptide.everyNDays ?? (peptide as Peptide & { intervalDays?: number }).intervalDays,
       paused: peptide.paused ?? false,
+      sites: normalizeInjectionSites(peptide.sites ?? []),
     };
   });
   const validIds = new Set(peptides.map(peptide => peptide.id));
@@ -157,7 +158,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
       weeksOff: row.weeks_off ?? undefined,
       reconstitutedAt: vial?.reconstituted_at ?? undefined,
       beyondUseDays: number(vial?.beyond_use_days, 28),
-      sites: row.default_sites ?? [],
+      sites: normalizeInjectionSites(row.default_sites ?? []),
       lastSite: row.last_site ?? undefined,
       notes: row.notes,
       archived: Boolean(row.archived_at),

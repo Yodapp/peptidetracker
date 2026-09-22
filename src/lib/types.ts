@@ -3,6 +3,16 @@ export type Route = "subcutaneous" | "intranasal" | "oral" | "topical";
 export type DoseStatus = "taken" | "skipped";
 export type ScheduleFrequency = "daily" | "weekdays" | "every_n_days" | "as_needed";
 
+export const defaultInjectionSites = ["Buk vänster", "Buk mitten", "Buk höger", "Lår vänster", "Lår höger"];
+
+export function normalizeInjectionSites(sites: string[]): string[] {
+  const oldFull = ["Buk vänster", "Buk höger", "Lår vänster", "Lår höger"];
+  const matches = (expected: string[]) => sites.length === expected.length && expected.every(site => sites.includes(site));
+  if (matches([...oldFull, "Annat"]) || matches(oldFull)) return [...defaultInjectionSites];
+  if (matches(["Buk vänster", "Buk höger"])) return defaultInjectionSites.slice(0, 3);
+  return sites;
+}
+
 export interface Schedule {
   slot: Slot;
   time: string;
