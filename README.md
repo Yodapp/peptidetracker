@@ -68,8 +68,9 @@ Run these migrations once, in order, in Supabase SQL Editor before deploying thi
 8. [`supabase/migrations/20260909094444_purchase_plans_and_vial_remaining.sql`](supabase/migrations/20260909094444_purchase_plans_and_vial_remaining.sql)
 9. [`supabase/migrations/202609200001_daily_checkin.sql`](supabase/migrations/202609200001_daily_checkin.sql)
 10. [`supabase/migrations/20260921203002_pain_level.sql`](supabase/migrations/20260921203002_pain_level.sql)
+11. [`supabase/migrations/20260922170000_shared_schedules.sql`](supabase/migrations/20260922170000_shared_schedules.sql)
 
-The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary. The fourth syncs the user's mcg/mg display preference. Migration 8 separates vial size from remaining inventory and adds RLS-protected saved purchase plans. Migrations 9 and 10 add the daily check-in scales, including pain.
+The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary. The fourth syncs the user's mcg/mg display preference. Migration 8 separates vial size from remaining inventory and adds RLS-protected saved purchase plans. Migrations 9 and 10 add the daily check-in scales, including pain. Migration 11 adds reusable shared peptide schedules and code-based imports.
 
 On the first signed-in load after upgrading, Peptime uploads existing browser data if the remote account is empty. It also merges locally added peptides if another device reached the account first.
 

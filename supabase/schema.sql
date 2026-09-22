@@ -142,10 +142,22 @@ create table public.purchase_plans (
   updated_at timestamptz not null default now()
 );
 
+create table public.shared_schedules (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  code text not null unique check (code ~ '^P[A-Z2-9]{5}$'),
+  name text not null check (char_length(btrim(name)) between 1 and 100),
+  items jsonb not null check (jsonb_typeof(items) = 'array' and jsonb_array_length(items) between 1 and 30),
+  groups jsonb not null default '[]'::jsonb check (jsonb_typeof(groups) = 'array'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index dose_logs_user_taken_idx on public.dose_logs(user_id, taken_at desc);
 create index schedules_user_active_idx on public.schedules(user_id, active);
 create index peptides_user_active_idx on public.peptides(user_id, archived_at);
 create index purchase_plans_user_updated_idx on public.purchase_plans(user_id, updated_at desc);
+create index shared_schedules_user_updated_idx on public.shared_schedules(user_id, updated_at desc);
 
 create function public.touch_updated_at() returns trigger language plpgsql security invoker set search_path = '' as $$
 begin new.updated_at = now(); return new; end; $$;
@@ -156,6 +168,7 @@ create trigger mix_groups_touch before update on public.mix_groups for each row 
 create trigger dose_logs_touch before update on public.dose_logs for each row execute function public.touch_updated_at();
 create trigger daily_notes_touch before update on public.daily_notes for each row execute function public.touch_updated_at();
 create trigger purchase_plans_touch before update on public.purchase_plans for each row execute function public.touch_updated_at();
+create trigger shared_schedules_touch before update on public.shared_schedules for each row execute function public.touch_updated_at();
 
 create function public.handle_new_user() returns trigger language plpgsql security definer set search_path = '' as $$
 begin insert into public.profiles(id) values (new.id) on conflict do nothing; return new; end; $$;
@@ -170,6 +183,7 @@ alter table public.mix_groups enable row level security;
 alter table public.dose_logs enable row level security;
 alter table public.daily_notes enable row level security;
 alter table public.purchase_plans enable row level security;
+alter table public.shared_schedules enable row level security;
 
 create policy "own profile" on public.profiles for all using (id = auth.uid()) with check (id = auth.uid());
 create policy "own peptides" on public.peptides for all using (user_id = auth.uid()) with check (user_id = auth.uid());
@@ -179,6 +193,17 @@ create policy "own mix groups" on public.mix_groups for all using (user_id = aut
 create policy "own logs" on public.dose_logs for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own daily notes" on public.daily_notes for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "own purchase plans" on public.purchase_plans for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "own shared schedules" on public.shared_schedules for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 grant usage on schema public to authenticated;
-grant select, insert, update, delete on public.profiles, public.peptides, public.vials, public.schedules, public.mix_groups, public.dose_logs, public.daily_notes, public.purchase_plans to authenticated;
+grant select, insert, update, delete on public.profiles, public.peptides, public.vials, public.schedules, public.mix_groups, public.dose_logs, public.daily_notes, public.purchase_plans, public.shared_schedules to authenticated;
+
+create function public.get_shared_schedule(p_code text) returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object('name', name, 'items', items, 'groups', groups)
+  from public.shared_schedules
+  where auth.uid() is not null and code = upper(btrim(p_code));
+$$;
+revoke execute on function public.get_shared_schedule(text) from public, anon;
+grant execute on function public.get_shared_schedule(text) to authenticated;
