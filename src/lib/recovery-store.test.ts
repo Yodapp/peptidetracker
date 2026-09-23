@@ -41,3 +41,11 @@ test("deletion scope excludes records added by another device", () => {
   assert.deepEqual(removedRecordIds(loaded, afterEdit), ["old-b"]);
   assert.deepEqual(removedRecordIds(loaded, loaded), []);
 });
+
+test("today-only selections do not pause account sync", () => {
+  const remote = { ...empty, onboardingComplete: true };
+  const snapshot = { ...remote, todayAdditions: ["2026-09-23:example"] };
+  const result = visibleRecoveryStore(remote, true, snapshot, undefined, undefined);
+  assert.equal(result.recovered, false);
+  assert.deepEqual(result.store.todayAdditions, ["2026-09-23:example"]);
+});

@@ -1,4 +1,5 @@
 import type { PeptimeStore } from "@/lib/types";
+import { groupKey } from "@/lib/schedule";
 
 type Collection = "peptides" | "mixGroups" | "logs" | "dailyNotes" | "purchasePlans";
 
@@ -38,7 +39,7 @@ export function storeFromSyncEntities(value: unknown, fallback: PeptimeStore): P
 function key(collection: Collection, item: unknown): string | undefined {
   if (!record(item)) return undefined;
   const value = collection === "dailyNotes" ? item.date : collection === "mixGroups" ? item.name : item.id;
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === "string" && value.length > 0 ? collection === "mixGroups" ? groupKey(value) : value : undefined;
 }
 
 function meaningful(store: PeptimeStore | undefined): store is PeptimeStore {
@@ -71,7 +72,9 @@ export function visibleRecoveryStore(remote: PeptimeStore, hasRemoteData: boolea
     (result as unknown as Record<Collection, unknown[]>)[collection] = combined;
   }
   const additions = new Set(result.todayAdditions);
-  for (const source of candidates) for (const id of source.todayAdditions) if (!additions.has(id)) { additions.add(id); recovered = true; }
+  // Today's selections have no row in the rolled-back relational schema.
+  // Keep them visible locally without treating them as missing cloud records.
+  for (const source of candidates) for (const id of source.todayAdditions) additions.add(id);
   result.todayAdditions = [...additions];
   if (!result.onboardingComplete && sources.some(source => source.onboardingComplete)) { result.onboardingComplete = true; recovered = true; }
   return { store: result, recovered };
