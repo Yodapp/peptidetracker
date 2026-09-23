@@ -21,7 +21,9 @@ import { defaultInjectionSites, syringeCapacity, syringeUnits, type DailyNote, t
 import { addDays, displayLogDate, logScheduledDate, previousDate, stockholmDate, stockholmDateTimeInput, stockholmHour, stockholmLocalToIso } from "@/lib/log-day";
 import { groupKey, isDueOn, peptideSchedule, resolvedSchedule, scheduleTargetKey } from "@/lib/schedule";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { loadRemoteStore, mergeStores, normalizeStoreIds, saveRemoteStore } from "@/lib/supabase/store";
+import { loadRemoteStore, normalizeStoreIds, saveRemoteStore } from "@/lib/supabase/store";
+import { readLocalRecovery } from "@/lib/local-recovery";
+import { storeFromSyncEntities, visibleRecoveryStore } from "@/lib/recovery-store";
 import { clampInventoryMg, deleteDoseLog, replaceDoseLog } from "@/lib/inventory";
 
 const STORAGE_KEY = "peptime-demo-v1";
@@ -129,9 +131,13 @@ function useStore() {
   const [hydrateAttempt, setHydrateAttempt] = useState(0);
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
+  const [recoveryActive, setRecoveryActive] = useState(false);
   const clientRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   const userIdRef = useRef<string | null>(null);
   const skipFirstSync = useRef(false);
+  const recoveryMode = useRef(false);
+  const lastSyncedStore = useRef<PeptimeStore | null>(null);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const hydrateFailures = useRef(0);
   const saveFailures = useRef(0);
   useEffect(() => {
@@ -154,22 +160,27 @@ function useStore() {
         userIdRef.current = data.user.id;
         setActiveUserId(data.user.id);
         const scopedKey = `${STORAGE_KEY}:${data.user.id}`;
-        const saved = localStorage.getItem(scopedKey) ?? localStorage.getItem(STORAGE_KEY);
+        const scopedSaved = localStorage.getItem(scopedKey);
+        const saved = scopedSaved ?? localStorage.getItem(STORAGE_KEY);
         const local = saved ? normalizeStoreIds(JSON.parse(saved)) : normalizeStoreIds(initialStore);
         cached = saved ? local : null;
         const remote = await loadRemoteStore(client, local);
-        setSyncError(null);
-        let next = remote.store;
-        const merged = mergeStores(remote.store, local);
-        const hasLocalAdditions = merged.peptides.length > remote.store.peptides.length || merged.logs.length > remote.store.logs.length || merged.dailyNotes.length > remote.store.dailyNotes.length || merged.purchasePlans.length > remote.store.purchasePlans.length;
-        if (saved && local.onboardingComplete && (!remote.hasData || hasLocalAdditions)) {
-          setSyncState("syncing");
-          next = await saveRemoteStore(client, data.user.id, remote.hasData ? merged : local);
-          localStorage.removeItem(STORAGE_KEY);
-          setSyncState("synced");
-        } else {
-          setSyncState(remote.hasData ? "synced" : "local");
-        }
+        const [syncSnapshot, deviceSnapshot] = await Promise.all([
+          client.from("sync_state").select("entities").eq("user_id", data.user.id).maybeSingle(),
+          readLocalRecovery(data.user.id),
+        ]);
+        if (syncSnapshot.error) console.warn("Peptime recovery snapshot unavailable", syncSnapshot.error.code);
+        const serverCopy = storeFromSyncEntities(syncSnapshot.data?.entities, remote.store);
+        const scopedCopy = scopedSaved ? local : !remote.hasData && saved ? local : undefined;
+        const recovered = visibleRecoveryStore(remote.store, remote.hasData, serverCopy, deviceSnapshot?.store, scopedCopy);
+        const hasUnresolvedChanges = Boolean(deviceSnapshot?.pending?.length || deviceSnapshot?.conflicts?.length);
+        recoveryMode.current = recovered.recovered || hasUnresolvedChanges || remote.orphanLogCount > 0;
+        setRecoveryActive(recoveryMode.current);
+        lastSyncedStore.current = recoveryMode.current ? null : remote.store;
+        const next = recovered.store;
+        cached = next.onboardingComplete ? next : cached;
+        setSyncError(recoveryMode.current ? "Återställningskopior finns kvar. Automatisk kontosynk är pausad för att skydda dem." : null);
+        setSyncState(recoveryMode.current ? "error" : remote.hasData ? "synced" : "local");
         if (!cancelled) {
           hydrateFailures.current = 0;
           skipFirstSync.current = true;
@@ -199,12 +210,23 @@ function useStore() {
     let retryTimer: number | undefined;
     const key = userIdRef.current ? `${STORAGE_KEY}:${userIdRef.current}` : STORAGE_KEY;
     localStorage.setItem(key, JSON.stringify(store));
+    if (recoveryMode.current) return;
     if (!clientRef.current || !userIdRef.current) return;
     if (skipFirstSync.current) { skipFirstSync.current = false; return; }
     const client = clientRef.current;
     const userId = userIdRef.current;
     const timer = window.setTimeout(async () => {
-      try { setSyncState("syncing"); await saveRemoteStore(client, userId, store); saveFailures.current = 0; setSyncError(null); setSyncState("synced"); }
+      try {
+        saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
+          if (recoveryMode.current) return;
+          setSyncState("syncing");
+          lastSyncedStore.current = await saveRemoteStore(client, userId, store, lastSyncedStore.current ?? store);
+          saveFailures.current = 0;
+          setSyncError(null);
+          setSyncState("synced");
+        });
+        await saveQueue.current;
+      }
       catch (error) {
         console.error("Peptime Supabase sync error", error);
         setSyncError(syncErrorMessage(error));
@@ -217,10 +239,11 @@ function useStore() {
     return () => { window.clearTimeout(timer); if (retryTimer) window.clearTimeout(retryTimer); };
   }, [ready, store, saveAttempt]);
   const retrySync = () => {
+    if (recoveryMode.current) { setHydrateAttempt(value => value + 1); return; }
     if (clientRef.current && userIdRef.current && ready) setSaveAttempt(value => value + 1);
     else setHydrateAttempt(value => value + 1);
   };
-  return [store, setStore, ready, syncState, retrySync, syncError, activeUserId] as const;
+  return [store, setStore, ready, syncState, retrySync, syncError, activeUserId, recoveryActive] as const;
 }
 
 function BottomNav({ view, setView }: { view: string; setView: (view: string) => void }) {
@@ -421,7 +444,7 @@ function CalendarView({ store, update, onBack }: { store: PeptimeStore; update: 
 }
 
 export function PeptimeApp({ userEmail }: { userEmail?: string }) {
-  const [store,update,ready,syncState,retrySync,syncError,userId]=useStore(); const [view,setView]=useState("today");
+  const [store,update,ready,syncState,retrySync,syncError,userId,recoveryActive]=useStore(); const [view,setView]=useState("today");
   const [insightPeptideId,setInsightPeptideId]=useState<string|null>(null);
   const [insightReturnView,setInsightReturnView]=useState<"peptides"|"insights">("peptides");
   const [calendarReturnView,setCalendarReturnView]=useState<"today"|"insights">("today");
@@ -430,5 +453,5 @@ export function PeptimeApp({ userEmail }: { userEmail?: string }) {
   useEffect(()=>{const media=window.matchMedia("(prefers-color-scheme: dark)");const apply=()=>{const mode=store.settings.themeMode??"system";document.documentElement.classList.toggle("dark",mode==="dark"||(mode==="system"&&media.matches))};apply();media.addEventListener("change",apply);return()=>media.removeEventListener("change",apply)},[store.settings.themeMode]);
   if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><RotateCcw className="mx-auto size-7 text-muted-foreground"/><h1 className="mt-4 text-xl font-medium">Kunde inte hämta ditt konto</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p>{syncError&&<p className="mt-3 break-words text-sm text-destructive">{syncError}</p>}<Button className="mt-5 h-12 w-full" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
   if(!store.onboardingComplete)return <Onboarding store={store} update={update}/>;
-  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} update={update} onBack={()=>setView("peptides")}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
+  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{recoveryActive&&<button type="button" onClick={()=>setView("settings")} className="mt-4 w-full rounded-2xl border border-amber-600/40 bg-amber-500/10 p-3 text-left text-sm leading-5 text-foreground">Återställningskopia visas. Kontosynk är pausad för att skydda uppgifterna. Visa kopia i Inställningar.</button>}{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} update={update} onBack={()=>setView("peptides")}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId} preserveLocal={recoveryActive}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
 }

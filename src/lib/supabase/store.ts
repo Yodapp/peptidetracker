@@ -10,6 +10,11 @@ function number(value: unknown, fallback = 0) { const result = Number(value); re
 function text(value: unknown, fallback = "") { return typeof value === "string" ? value : fallback; }
 function optionalText(value: unknown) { const result = text(value).trim(); return result || undefined; }
 
+export function removedRecordIds<T extends { id: string }>(previous: T[], current: T[]) {
+  const currentIds = new Set(current.map(item => item.id));
+  return previous.map(item => item.id).filter(id => !currentIds.has(id));
+}
+
 function purchaseItems(value: unknown): PurchasePlanItem[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap(raw => {
@@ -189,7 +194,8 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     if (group) Object.assign(peptide, group, { name: peptide.name });
   });
   const names = new Map(peptides.map(peptide => [peptide.id, peptide.name]));
-  const logs: DoseLog[] = logRows.filter(row => names.has(row.peptide_id)).map(row => ({
+  const orphanLogCount = logRows.filter(row => !names.has(row.peptide_id)).length;
+  const logs: DoseLog[] = logRows.map(row => ({
     id: row.id,
     peptideId: row.peptide_id,
     peptideName: names.get(row.peptide_id) ?? "Peptid",
@@ -228,10 +234,10 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     onboardingComplete: Boolean(profile?.onboarding_complete),
   };
   const hasData = Boolean(profile?.onboarding_complete || peptideRows.length || logRows.length || noteRows.length || purchasePlanRows.length);
-  return { store: hasData ? store : normalizeStoreIds(fallback), hasData };
+  return { store: hasData ? store : normalizeStoreIds(fallback), hasData, orphanLogCount };
 }
 
-export async function saveRemoteStore(client: SupabaseClient, userId: string, input: PeptimeStore) {
+export async function saveRemoteStore(client: SupabaseClient, userId: string, input: PeptimeStore, previous: PeptimeStore) {
   const store = normalizeStoreIds(input);
   const usedMg = new Map<string, number>();
   store.logs.forEach(log => {
@@ -260,30 +266,17 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
     if (vialResult.error?.code === "PGRST204" || vialResult.error?.code === "42703") vialResult = await client.from("vials").upsert(store.peptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.remainingMg + (usedMg.get(peptide.id) ?? 0) })), { onConflict: "id" });
     results.push(vialResult);
     const standalone = mixGroupsSupported ? store.peptides.filter(peptide => !peptide.mixGroupId) : store.peptides;
-    const groupedIds = store.peptides.filter(peptide => peptide.mixGroupId).map(peptide => peptide.id);
     if (standalone.length) {
       const rows = standalone.map(peptide => ({ id: peptide.id, user_id: userId, peptide_id: peptide.id, slot: peptide.slot, clock_time: peptide.time, frequency: frequency(peptide.frequency), weekdays: peptide.weekdays, every_n_days: peptide.everyNDays ?? null, times_per_week: null, starts_on: peptide.anchorDate ?? new Date().toISOString().slice(0, 10), active: !peptide.archived }));
       let scheduleResult = await client.from("schedules").upsert(rows.map((row,index) => ({ ...row, paused: standalone[index].paused })), { onConflict: "id" });
       if (scheduleResult.error?.code === "PGRST204" || scheduleResult.error?.code === "42703") scheduleResult = await client.from("schedules").upsert(rows, { onConflict: "id" });
       results.push(scheduleResult);
     }
-    if (mixGroupsSupported && groupedIds.length) results.push(await client.from("schedules").delete().in("peptide_id", groupedIds));
   }
   const logRows = store.logs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }));
   if (logRows.length) {
     const logResult = await client.from("dose_logs").upsert(logRows, { onConflict: "id" });
     results.push(logResult);
-    if (!logResult.error) {
-      const existingResult = await client.from("dose_logs").select("id").eq("user_id", userId);
-      results.push(existingResult);
-      if (!existingResult.error) {
-        const localIds = new Set(logRows.map(row => row.id));
-        const staleIds = (existingResult.data ?? []).map(row => row.id).filter(id => !localIds.has(id));
-        for (let index = 0; index < staleIds.length; index += 100) results.push(await client.from("dose_logs").delete().in("id", staleIds.slice(index, index + 100)));
-      }
-    }
-  } else {
-    results.push(await client.from("dose_logs").delete().eq("user_id", userId));
   }
   if (store.dailyNotes.length) {
     const hasPainValue = store.dailyNotes.some(note => note.painLevel !== undefined);
@@ -297,21 +290,21 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
     const planResult = await client.from("purchase_plans").upsert(store.purchasePlans.map(plan => ({ id: plan.id, user_id: userId, name: plan.name, items: plan.items, created_at: plan.createdAt, updated_at: plan.updatedAt })), { onConflict: "id" });
     if (planResult.error?.code !== "PGRST205" && planResult.error?.code !== "42P01") {
       results.push(planResult);
-      if (!planResult.error) {
-        const existingResult = await client.from("purchase_plans").select("id").eq("user_id", userId);
-        results.push(existingResult);
-        if (!existingResult.error) {
-          const localIds = new Set(store.purchasePlans.map(plan => plan.id));
-          const staleIds = (existingResult.data ?? []).map(row => row.id).filter(id => !localIds.has(id));
-          if (staleIds.length) results.push(await client.from("purchase_plans").delete().in("id", staleIds));
-        }
-      }
     }
-  } else {
-    const deletePlansResult = await client.from("purchase_plans").delete().eq("user_id", userId);
-    if (deletePlansResult.error?.code !== "PGRST205" && deletePlansResult.error?.code !== "42P01") results.push(deletePlansResult);
   }
   const error = results.find(result => result.error)?.error;
   if (error) throw error;
+  // Only delete IDs that were loaded here and then explicitly removed. Never
+  // compare against every server row: another device may have added records.
+  const removedLogIds = removedRecordIds(previous.logs, store.logs);
+  for (let index = 0; index < removedLogIds.length; index += 100) {
+    const result = await client.from("dose_logs").delete().eq("user_id", userId).in("id", removedLogIds.slice(index, index + 100));
+    if (result.error) throw result.error;
+  }
+  const removedPlanIds = removedRecordIds(previous.purchasePlans, store.purchasePlans);
+  if (removedPlanIds.length) {
+    const result = await client.from("purchase_plans").delete().eq("user_id", userId).in("id", removedPlanIds);
+    if (result.error?.code !== "PGRST205" && result.error?.code !== "42P01") throw result.error;
+  }
   return store;
 }
