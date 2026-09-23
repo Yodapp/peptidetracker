@@ -85,13 +85,13 @@ Vercel will run `npm run build` using the stable webpack compiler. No service-ro
 
 ## Web Push reminders
 
-The app contains a safe notification-permission flow and service-worker handlers. The switch defaults to off and remains off if permission is denied. iOS Web Push requires Peptime to be installed on the Home Screen and permission to be requested from the installed app.
+The service worker contains notification handlers, but the in-app reminder control intentionally stays disabled until the subscription and delivery pipeline below exists. iOS Web Push requires Peptime to be installed on the Home Screen and permission to be requested from the installed app.
 
 Production delivery still needs a server-side Web Push scheduler. Configure VAPID keys in Vercel (`NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`), store each authenticated user's Push API subscription in a protected Supabase table, and schedule one message per due time slot. The payload should combine all items in the slot, for example `Morgon 08:00 — Adamax 2 IU, Selank 5 IU`; do not enqueue one message per peptide. Browser push delivery is best-effort and should not be presented as native-app reliability.
 
 ## Data and privacy notes
 
-- With Supabase configured, the local browser store is an offline-tolerant cache and Supabase is the cross-device source of truth.
+- With Supabase configured, the local browser store is an offline-tolerant, unencrypted cache and Supabase is the cross-device source of truth. Peptime clears its local data and app caches on sign-out.
 - Without Supabase variables, Peptime continues to work as a device-local demo.
 - Supabase tables use RLS and reject rows that do not belong to `auth.uid()`.
 - Peptides with logs should be archived instead of deleted. The schema uses restrictive foreign keys for logged peptide records.
