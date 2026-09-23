@@ -32,7 +32,6 @@ export interface MixGroupSchedule extends Schedule {
 
 export interface Peptide {
   id: string;
-  currentVialId?: string;
   name: string;
   shortCode: string;
   color: string;
@@ -61,18 +60,6 @@ export interface Peptide {
   notes: string;
   archived: boolean;
   example: boolean;
-}
-
-export interface VialRecord {
-  id: string;
-  peptideId: string;
-  initialMg: number;
-  remainingMg: number;
-  waterMl: number;
-  openedAt: string;
-  closedAt?: string;
-  reconstitutedAt?: string;
-  beyondUseDays: number;
 }
 
 export interface DoseLog {
@@ -111,7 +98,6 @@ export type PurchaseFrequency = "daily" | "every_n_days" | "times_per_week";
 export interface PurchasePlanItem {
   id: string;
   name: string;
-  route?: Route;
   vialMg: number;
   doseMcg: number;
   doseEntryUnit: "mcg" | "mg";
@@ -143,7 +129,6 @@ export interface AppSettings {
 
 export interface PeptimeStore {
   peptides: Peptide[];
-  vials: VialRecord[];
   mixGroups: MixGroupSchedule[];
   logs: DoseLog[];
   dailyNotes: DailyNote[];

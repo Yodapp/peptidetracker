@@ -21,7 +21,6 @@ export function projectPurchase(item: PurchasePlanItem, days: number): PurchaseP
 }
 
 export function planDoseIu(item: PurchasePlanItem) {
-  if (item.route && item.route !== "subcutaneous") return 0;
   if (item.vialMg <= 0 || item.bacWaterMl <= 0) return 0;
   return (item.doseMcg * item.bacWaterMl) / (item.vialMg * 10);
 }

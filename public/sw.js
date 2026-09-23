@@ -1,6 +1,6 @@
 const CACHE_PREFIX = "peptime-";
-const SHELL_CACHE = `${CACHE_PREFIX}shell-v4`;
-const STATIC_CACHE = `${CACHE_PREFIX}static-v4`;
+const SHELL_CACHE = `${CACHE_PREFIX}shell-v3`;
+const STATIC_CACHE = `${CACHE_PREFIX}static-v3`;
 const PRECACHE = ["/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png"];
 
 async function cacheShell() {
@@ -10,20 +10,21 @@ async function cacheShell() {
     if (response.ok) await shellCache.put(path, response);
   }));
 
-  const page = await fetch("/offline", { cache: "reload", credentials: "same-origin" });
-  if (!page.ok) throw new Error("Offline shell unavailable");
-  await shellCache.put("/offline", page.clone());
+  const page = await fetch("/", { cache: "reload", credentials: "same-origin" });
+  if (!page.ok) return;
+  await shellCache.put("/", page.clone());
   const html = await page.text();
-  const assetPaths = [...new Set(html.match(/\/_next\/static\/[A-Za-z0-9_./-]+/g) ?? [])];
+  const assetPaths = [...new Set(html.match(/\/_next\/static\/[^"'<>\s]+/g) ?? [])];
   const staticCache = await caches.open(STATIC_CACHE);
-  await Promise.all(assetPaths.map(async path => {
+  await Promise.allSettled(assetPaths.map(async path => {
     const response = await fetch(path, { cache: "reload", credentials: "same-origin" });
-    if (!response.ok) throw new Error(`Offline asset unavailable: ${path}`);
-    await staticCache.put(path, response);
+    if (response.ok) await staticCache.put(path, response);
   }));
 }
 
-self.addEventListener("install", event => { event.waitUntil(cacheShell()); });
+self.addEventListener("install", event => {
+  event.waitUntil(cacheShell().catch(() => undefined));
+});
 
 self.addEventListener("activate", event => event.waitUntil((async () => {
   const names = await caches.keys();
@@ -33,14 +34,13 @@ self.addEventListener("activate", event => event.waitUntil((async () => {
 
 self.addEventListener("message", event => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
-  if (event.data?.type === "CACHE_SHELL") event.waitUntil(cacheShell());
 });
 
 self.addEventListener("fetch", event => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   const isNextDataRequest = url.searchParams.has("_rsc") || event.request.headers.has("RSC") || event.request.headers.has("Next-Router-Prefetch");
-  if (url.origin !== self.location.origin || isNextDataRequest || url.pathname.startsWith("/auth/") || url.pathname.startsWith("/api/")) return;
+  if (url.origin !== self.location.origin || isNextDataRequest || url.pathname.startsWith("/auth/") || url.pathname.startsWith("/api/") || url.pathname === "/login") return;
 
   if (url.pathname.startsWith("/_next/static/")) {
     event.respondWith((async () => {
@@ -57,15 +57,22 @@ self.addEventListener("fetch", event => {
     event.respondWith((async () => {
       try {
         const response = await fetch(event.request);
+        if (response.ok) (await caches.open(SHELL_CACHE)).put(event.request, response.clone());
         return response;
       } catch {
-        return (await caches.match("/offline")) || new Response("Peptime är offline. Anslut till internet och försök igen.", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+        return (await caches.match(event.request)) || (await caches.match("/")) || new Response("Peptime är offline. Anslut till internet och försök igen.", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
       }
     })());
     return;
   }
 
-  if (PRECACHE.includes(url.pathname)) event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
+  event.respondWith((async () => {
+    const cached = await caches.match(event.request);
+    if (cached) return cached;
+    const response = await fetch(event.request);
+    if (response.ok && response.type === "basic") (await caches.open(STATIC_CACHE)).put(event.request, response.clone());
+    return response;
+  })());
 });
 self.addEventListener("push", event => {
   let payload = { title: "Peptime", body: "Du har en planerad loggpost." };

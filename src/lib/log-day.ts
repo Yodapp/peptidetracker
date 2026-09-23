@@ -37,7 +37,7 @@ export function logScheduledDate(log: { takenAt: string; scheduledDate?: string 
 
 export function stockholmDateTimeInput(input: Date | string) {
   const parts = Object.fromEntries(dateParts.formatToParts(new Date(input)).map(part => [part.type, part.value]));
-  const minute = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", minute: "2-digit" }).format(new Date(input)).padStart(2, "0");
+  const minute = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", minute: "2-digit" }).format(new Date(input));
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${minute}`;
 }
 

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compareMetric, compareTag, exposureForSelection, exposureGroups, topPatterns } from "./insight-analysis";
-import { addDays } from "./log-day";
 import type { DailyNote, DoseLog, Peptide, PeptimeStore } from "./types";
 
 const peptide = (id: string, name: string, mixGroupId?: string): Peptide => ({
@@ -18,7 +17,7 @@ const dose = (id: string, peptideId: string, peptideName: string, scheduledDate:
 const note = (date: string, values: Partial<DailyNote>): DailyNote => ({ date, note: "", tags: [], ...values });
 
 const store = (logs: DoseLog[], dailyNotes: DailyNote[], peptides: Peptide[]): PeptimeStore => ({
-  logs, dailyNotes, peptides, vials: [], mixGroups: [], purchasePlans: [], todayAdditions: [], onboardingComplete: true,
+  logs, dailyNotes, peptides, mixGroups: [], purchasePlans: [], todayAdditions: [], onboardingComplete: true,
   settings: { syringe: "U-100 0.3 ml", customDailyTags: [], massDisplayUnit: "mcg", timezone: "Europe/Stockholm", language: "sv", theme: "dark", themeMode: "system", dayBoundaryHour: 4, remindersEnabled: false },
 });
 
@@ -98,11 +97,11 @@ test("jämför taggfrekvens med exakta nämnare", () => {
 
 test("lyfter ett starkt observerat sömnmönster", () => {
   const p = peptide("p1", "Ipamorelin");
-  const dates = ["2026-08-28", "2026-08-30", "2026-09-02", "2026-09-04", "2026-09-06", "2026-09-08", "2026-09-10", "2026-09-12"];
+  const dates = ["2026-09-10", "2026-09-12", "2026-09-14", "2026-09-16"];
   const logs = dates.map((date, index) => dose(`d${index}`, p.id, p.name, date));
   const notes = [
-    ...dates.map(date => note(addDays(date, 1), { sleepQuality: 1 })),
-    ...["2026-08-22", "2026-08-23", "2026-08-24", "2026-08-25", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18"].map(date => note(date, { sleepQuality: 4 })),
+    ...["2026-09-11", "2026-09-13", "2026-09-15", "2026-09-17"].map(date => note(date, { sleepQuality: 1 })),
+    ...["2026-09-02", "2026-09-04", "2026-09-06", "2026-09-08"].map(date => note(date, { sleepQuality: 4 })),
   ];
   const patterns = topPatterns(store(logs, notes, [p]), 30, "2026-09-20");
   assert.equal(patterns[0]?.comparison.kind, "metric");

@@ -29,7 +29,6 @@ function Decimal({ value, onChange }: { value: number; onChange: (value: number)
 }
 
 function DoseSummary({ item }: { item: Item }) {
-  const injectable = item.route === "subcutaneous";
   const units = syringeUnits(item.doseMcg, item.vialMg, item.waterMl);
   const doses = item.doseMcg > 0 && item.vialMg > 0 ? Math.floor((item.vialMg * 1000) / item.doseMcg) : 0;
   const days = item.frequency === "daily"
@@ -47,8 +46,8 @@ function DoseSummary({ item }: { item: Item }) {
 
   return <div className="grid grid-cols-2 overflow-hidden rounded-2xl border border-border bg-muted/40">
     <div className="p-4">
-      <p className="text-xs font-medium text-muted-foreground">{injectable ? "U-100 per dos" : "Dos"}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{injectable ? number(units) : number(item.doseMcg)} <span className="text-base">{injectable ? "enheter" : "mcg"}</span></p>
+      <p className="text-xs font-medium text-muted-foreground">U-100 per dos</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums">{number(units)} <span className="text-base">enheter</span></p>
     </div>
     <div className="border-l border-border p-4">
       <p className="text-xs font-medium text-muted-foreground">En vial</p>
@@ -117,9 +116,8 @@ export function ScheduleSharing({ store, update, onBack }: { store: PeptimeStore
       groupNames.set(key(original), name);
       return { ...group, name };
     });
-    const peptides: Peptide[] = addedItems.map(item => { const id = crypto.randomUUID(); return { ...item, id, currentVialId: id, name: item.name.trim(), shortCode: item.shortCode || item.name.slice(0, 3), mixGroupId: item.mixGroupId ? groupNames.get(key(item.mixGroupId)) ?? item.mixGroupId : undefined, remainingMg: item.vialMg, notes: item.notes ?? "", archived: false, example: false }; });
-    const openedAt = new Date().toISOString();
-    update(value => ({ ...value, peptides: [...value.peptides, ...peptides], vials: [...value.vials, ...peptides.map(peptide => ({ id: peptide.currentVialId!, peptideId: peptide.id, initialMg: peptide.vialMg, remainingMg: peptide.vialMg, waterMl: peptide.waterMl, openedAt, beyondUseDays: peptide.beyondUseDays }))], mixGroups: [...value.mixGroups, ...groups] }));
+    const peptides: Peptide[] = addedItems.map(item => ({ ...item, id: crypto.randomUUID(), name: item.name.trim(), shortCode: item.shortCode || item.name.slice(0, 3), mixGroupId: item.mixGroupId ? groupNames.get(key(item.mixGroupId)) ?? item.mixGroupId : undefined, remainingMg: item.vialMg, notes: item.notes ?? "", archived: false, example: false }));
+    update(value => ({ ...value, peptides: [...value.peptides, ...peptides], mixGroups: [...value.mixGroups, ...groups] }));
     setMessage(`${peptides.length} peptider importerades${duplicates ? `. ${duplicates} med samma namn fanns redan och hoppades över.` : "."}`); setPreview(null); setImportCode("");
   };
 

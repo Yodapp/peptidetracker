@@ -61,7 +61,7 @@ export function BodyMap({ logs }: { logs: DoseLog[] }) {
         {known.filter(site => site.side === side).map(site => {
           const count = events.filter(event => event[0].site?.toLocaleLowerCase("sv-SE") === site.name.toLocaleLowerCase("sv-SE")).length;
           const active = focus === site.name;
-          return <button key={site.name} type="button" aria-label={`Visa historik för ${site.name}: ${count} ${count === 1 ? "injektionstillfälle" : "injektionstillfällen"}`} aria-pressed={active} onClick={() => showHistory(site.name)} title={site.name} style={{ left: `${site.x / 144 * 100}%`, top: `${site.y / 218 * 100}%` }} className={`absolute grid size-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 text-xs font-semibold shadow-sm transition-transform hover:scale-110 ${active ? "border-foreground bg-primary text-primary-foreground" : count ? "border-background bg-primary text-primary-foreground" : "border-primary bg-card text-primary"}`}>{count || <span className="size-2 rounded-full bg-primary" />}</button>;
+          return <button key={site.name} type="button" aria-label={`Visa historik för ${site.name}: ${count} ${count === 1 ? "injektionstillfälle" : "injektionstillfällen"}`} aria-pressed={active} onClick={() => showHistory(site.name)} title={site.name} style={{ left: `${site.x / 144 * 100}%`, top: `${site.y / 218 * 100}%` }} className={`absolute grid size-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 text-[11px] font-semibold shadow-sm transition-transform hover:scale-110 ${active ? "border-foreground bg-primary text-primary-foreground" : count ? "border-background bg-primary text-primary-foreground" : "border-primary bg-card text-primary"}`}>{count || <span className="size-2 rounded-full bg-primary" />}</button>;
         })}
         <p className="mt-1 text-xs font-medium text-muted-foreground">{side === "front" ? "Framsida" : "Baksida"}</p>
       </div>)}
@@ -135,14 +135,14 @@ function PatternCards({ store, period, today }: { store: PeptimeStore; period: 3
   const patterns = topPatterns(store, period, today);
   const groups = exposureGroups(store, period, today);
   const noteDays = store.dailyNotes.filter(note => note.date >= periodStart(today, period) && note.date <= today && hasDailyEntry(note)).length;
-  const enoughForComparison = groups.some(group => group.doseDates.length >= 8) && noteDays >= 16;
+  const enoughForComparison = groups.some(group => group.doseDates.length >= 4) && noteDays >= 8;
   const title = (pattern: InsightPattern) => {
     const comparison = pattern.comparison;
     const subject = comparison.kind === "metric" ? metricDefinitions.find(metric => metric.key === comparison.metricKey)!.label : tagLabel(comparison.tag);
     return `${subject} ${pattern.window === "next_day" ? "dagen efter" : "på dosdagen"} ${pattern.exposure.label}`;
   };
   return <section className={`${card} mb-5`}>
-    <div className="mb-4 flex items-center gap-2"><Sparkles className="size-4 text-primary"/><div><h2 className="text-lg font-medium">Utforska dina loggar</h2><p className="mt-0.5 text-xs text-muted-foreground">Observerade skillnader med minst åtta svar i varje grupp</p></div></div>
+    <div className="mb-4 flex items-center gap-2"><Sparkles className="size-4 text-primary"/><div><h2 className="text-lg font-medium">Mönster i dina loggar</h2><p className="mt-0.5 text-xs text-muted-foreground">De största skillnaderna med tillräckligt underlag</p></div></div>
     {patterns.length > 0 ? <div className="divide-y divide-border">{patterns.map(pattern => {
       const comparison = pattern.comparison;
       return <div key={`${pattern.exposure.id}:${comparison.kind === "metric" ? comparison.metricKey : comparison.tag}:${pattern.window}`} className="py-4 first:pt-0 last:pb-0">
@@ -151,10 +151,8 @@ function PatternCards({ store, period, today }: { store: PeptimeStore; period: 3
           ? <p className="mt-1 text-sm leading-6 text-muted-foreground"><strong className="font-semibold text-foreground">{patternNumber(comparison.exposedAverage!)} av 5</strong> på {comparison.exposedCount} svar, jämfört med <strong className="font-semibold text-foreground">{patternNumber(comparison.baselineAverage!)}</strong> på {comparison.baselineCount} andra dagar.</p>
           : <p className="mt-1 text-sm leading-6 text-muted-foreground">Loggat <strong className="font-semibold text-foreground">{comparison.exposedOccurrences} av {comparison.exposedCount} dagar</strong>, jämfört med {comparison.baselineOccurrences} av {comparison.baselineCount} andra dagar.</p>}
         {pattern.exposure.coDose && <p className="mt-1 text-xs leading-5 text-muted-foreground">{pattern.exposure.coDose.label} togs också på {pattern.exposure.coDose.count} av {pattern.exposure.coDose.total} dosdagar.</p>}
-        <details className="mt-2 text-xs"><summary className="min-h-9 cursor-pointer py-2 font-medium text-primary">Visa underliggande doser</summary><div className="max-h-44 space-y-1 overflow-auto rounded-xl bg-muted/50 p-3">{store.logs.filter(log=>log.status==="taken"&&pattern.exposure.peptideIds.includes(log.peptideId)&&pattern.exposure.doseDates.includes(dayOf(log,store))).sort((a,b)=>b.takenAt.localeCompare(a.takenAt)).map(log=><p key={log.id}>{dayOf(log,store)} · {log.peptideName} · {formatNumber(log.actualDose)} {log.unit}</p>)}</div></details>
       </div>;
-    })}</div> : <div className="rounded-xl border border-dashed border-border p-4 text-sm leading-6 text-muted-foreground">{groups.length === 0 ? "Skillnader visas när du har loggat doser och mående." : enoughForComparison ? "Inga större skillnader syns i den valda perioden." : "Fortsätt fylla i mående. En översikt visas när minst åtta dosdagar och åtta andra dagar har svar."}</div>}
-    <p className="mt-4 text-xs leading-5 text-muted-foreground">Det här är utforskande jämförelser. Flera ämnen kan ha tagits samma dag, och skillnader kan uppstå av slumpen. De visar inte orsak eller effekt.</p>
+    })}</div> : <div className="rounded-xl border border-dashed border-border p-4 text-sm leading-6 text-muted-foreground">{groups.length === 0 ? "Mönster visas när du har loggat doser och mående." : enoughForComparison ? "Inga större skillnader syns i den valda perioden." : "Fortsätt fylla i mående. En jämförelse visas när minst fyra dosdagar och fyra andra dagar har svar."}</div>}
   </section>;
 }
 
@@ -180,12 +178,12 @@ function ActivityCalendar({ store, period, today, onOpenCalendar }: { store: Pep
 
   return <section className={`${card} mb-5`}>
     <div className="flex items-start gap-2"><CalendarDays className="mt-0.5 size-4 text-primary"/><div><h2 className="text-lg font-medium">Doser och mående per dag</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Mörkare ruta betyder fler tagna doser. Blå prick visar mående eller vald tagg.</p></div></div>
-    <div className="mt-5 grid grid-cols-7 gap-1 text-center font-mono text-xs text-muted-foreground">{"M T O T F L S".split(" ").map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
+    <div className="mt-5 grid grid-cols-7 gap-1 text-center font-mono text-[10px] text-muted-foreground">{"M T O T F L S".split(" ").map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
     <div className="mt-2 grid grid-cols-7 gap-1.5">{cells.map((date, index) => {
       if (!date) return <span key={`empty-${index}`}/>;
       const count = logs.filter(log => log.status === "taken" && dayOf(log, store) === date).length;
       const hasMarker = selectedTag === "all" ? hasDailyEntry(notes.get(date)) : Boolean(notes.get(date)?.tags.includes(selectedTag));
-      return <button type="button" key={date} onClick={() => setSelectedDate(date)} aria-label={`${date}: ${count} tagna doser${hasMarker ? ", mående registrerat" : ""}`} className={`relative aspect-square min-h-9 rounded-lg border text-xs tabular-nums ${selectedDate === date ? "border-foreground" : "border-transparent"} ${count === 0 ? "bg-muted/70" : count === 1 ? "bg-primary/45" : count === 2 ? "bg-primary/70 text-primary-foreground" : "bg-primary text-primary-foreground"}`}>{Number(date.slice(-2))}{hasMarker && <span className="absolute bottom-1 right-1 size-1.5 rounded-full bg-[#7f9fca] ring-1 ring-card"/>}</button>;
+      return <button type="button" key={date} onClick={() => setSelectedDate(date)} aria-label={`${date}: ${count} tagna doser${hasMarker ? ", mående registrerat" : ""}`} className={`relative aspect-square min-h-9 rounded-lg border text-[11px] tabular-nums ${selectedDate === date ? "border-foreground" : "border-transparent"} ${count === 0 ? "bg-muted/70" : count === 1 ? "bg-primary/45" : count === 2 ? "bg-primary/70 text-primary-foreground" : "bg-primary text-primary-foreground"}`}>{Number(date.slice(-2))}{hasMarker && <span className="absolute bottom-1 right-1 size-1.5 rounded-full bg-[#7f9fca] ring-1 ring-card"/>}</button>;
     })}</div>
 
     {tags.length > 0 && <div className="mt-4 flex flex-wrap gap-1.5"><button type="button" onClick={() => setSelectedTag("all")} aria-pressed={selectedTag === "all"} className={`min-h-9 rounded-full border px-2.5 text-xs ${selectedTag === "all" ? "border-primary bg-accent text-accent-foreground" : "border-border"}`}>Allt mående</button>{tags.map(tag => <button type="button" key={tag.id} onClick={() => setSelectedTag(tag.id)} aria-pressed={selectedTag === tag.id} className={`min-h-9 rounded-full border px-2.5 text-xs ${selectedTag === tag.id ? "border-primary bg-accent text-accent-foreground" : "border-border"}`}>{tagLabel(tag.id)} · {tag.count}</button>)}</div>}

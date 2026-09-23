@@ -31,7 +31,6 @@ export function PwaUpdatePrompt() {
     navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
     navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then(value => {
       registration = value;
-      if (value.active) value.active.postMessage({ type: "CACHE_SHELL" });
       if (value.waiting && navigator.serviceWorker.controller) setWaitingWorker(value.waiting);
       value.addEventListener("updatefound", onUpdateFound);
     }).catch(() => undefined);
