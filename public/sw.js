@@ -23,7 +23,10 @@ async function cacheShell() {
 }
 
 self.addEventListener("install", event => {
-  event.waitUntil(cacheShell().catch(() => undefined));
+  event.waitUntil((async () => {
+    await cacheShell().catch(() => undefined);
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener("activate", event => event.waitUntil((async () => {
