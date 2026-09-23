@@ -128,6 +128,7 @@ function useStore() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [hydrateAttempt, setHydrateAttempt] = useState(0);
   const [saveAttempt, setSaveAttempt] = useState(0);
+  const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const clientRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   const userIdRef = useRef<string | null>(null);
   const skipFirstSync = useRef(false);
@@ -151,6 +152,7 @@ function useStore() {
         if (!data.user) throw new Error("No authenticated Supabase user");
         clientRef.current = client;
         userIdRef.current = data.user.id;
+        setActiveUserId(data.user.id);
         const scopedKey = `${STORAGE_KEY}:${data.user.id}`;
         const saved = localStorage.getItem(scopedKey) ?? localStorage.getItem(STORAGE_KEY);
         const local = saved ? normalizeStoreIds(JSON.parse(saved)) : normalizeStoreIds(initialStore);
@@ -218,7 +220,7 @@ function useStore() {
     if (clientRef.current && userIdRef.current && ready) setSaveAttempt(value => value + 1);
     else setHydrateAttempt(value => value + 1);
   };
-  return [store, setStore, ready, syncState, retrySync, syncError] as const;
+  return [store, setStore, ready, syncState, retrySync, syncError, activeUserId] as const;
 }
 
 function BottomNav({ view, setView }: { view: string; setView: (view: string) => void }) {
@@ -419,7 +421,7 @@ function CalendarView({ store, update, onBack }: { store: PeptimeStore; update: 
 }
 
 export function PeptimeApp({ userEmail }: { userEmail?: string }) {
-  const [store,update,ready,syncState,retrySync,syncError]=useStore(); const [view,setView]=useState("today");
+  const [store,update,ready,syncState,retrySync,syncError,userId]=useStore(); const [view,setView]=useState("today");
   const [insightPeptideId,setInsightPeptideId]=useState<string|null>(null);
   const [insightReturnView,setInsightReturnView]=useState<"peptides"|"insights">("peptides");
   const [calendarReturnView,setCalendarReturnView]=useState<"today"|"insights">("today");
@@ -428,5 +430,5 @@ export function PeptimeApp({ userEmail }: { userEmail?: string }) {
   useEffect(()=>{const media=window.matchMedia("(prefers-color-scheme: dark)");const apply=()=>{const mode=store.settings.themeMode??"system";document.documentElement.classList.toggle("dark",mode==="dark"||(mode==="system"&&media.matches))};apply();media.addEventListener("change",apply);return()=>media.removeEventListener("change",apply)},[store.settings.themeMode]);
   if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><RotateCcw className="mx-auto size-7 text-muted-foreground"/><h1 className="mt-4 text-xl font-medium">Kunde inte hämta ditt konto</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p>{syncError&&<p className="mt-3 break-words text-sm text-destructive">{syncError}</p>}<Button className="mt-5 h-12 w-full" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
   if(!store.onboardingComplete)return <Onboarding store={store} update={update}/>;
-  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} update={update} onBack={()=>setView("peptides")}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
+  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} update={update} onBack={()=>setView("peptides")}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
 }
