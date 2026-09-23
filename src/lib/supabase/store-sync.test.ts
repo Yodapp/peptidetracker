@@ -1,0 +1,59 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { initialStore } from "../demo-data";
+import type { DoseLog } from "../types";
+import { changedRecords, normalizeStoreIds, saveRemoteStore } from "./store";
+
+function recordingClient() {
+  const calls: { table: string; operation: string; rows?: unknown }[] = [];
+  const client = {
+    from(table: string) {
+      return {
+        upsert(rows: unknown) { calls.push({ table, operation: "upsert", rows }); return Promise.resolve({ error: null }); },
+        select() { return { limit() { return Promise.resolve({ error: null, data: [] }); } }; },
+        delete() { return { eq() { return { in(_key: string, ids: string[]) { calls.push({ table, operation: "delete", rows: ids }); return Promise.resolve({ error: null }); } }; } }; },
+      };
+    },
+  } as unknown as SupabaseClient;
+  return { client, calls };
+}
+
+const userId = "11111111-1111-4111-8111-111111111111";
+const base = () => ({ ...normalizeStoreIds(initialStore), onboardingComplete: true });
+
+test("unchanged records and property order cause no writes", async () => {
+  assert.deepEqual(changedRecords([{ id: "a", name: "A", dose: 1 }], [{ dose: 1, name: "A", id: "a" }], item => item.id), []);
+  const before = base();
+  const { client, calls } = recordingClient();
+  await saveRemoteStore(client, userId, { ...before, todayAdditions: ["today:item"] }, before);
+  assert.deepEqual(calls, []);
+});
+
+test("a settings edit does not rewrite peptides or dose logs", async () => {
+  const before = base();
+  const next = { ...before, settings: { ...before.settings, syringe: "U-100 0.5 ml" as const } };
+  const { client, calls } = recordingClient();
+  await saveRemoteStore(client, userId, next, before);
+  assert.deepEqual(calls.map(call => call.table), ["profiles"]);
+});
+
+test("adding one dose log writes only that log", async () => {
+  const before = base();
+  const peptide = before.peptides[0];
+  const log: DoseLog = { id: "22222222-2222-4222-8222-222222222222", peptideId: peptide.id, peptideName: peptide.name, plannedDose: 100, actualDose: 100, unit: "mcg", computedIu: 4, slot: "morning", takenAt: "2026-09-23T08:00:00.000Z", scheduledDate: "2026-09-23", status: "taken", note: "" };
+  const { client, calls } = recordingClient();
+  await saveRemoteStore(client, userId, { ...before, logs: [log] }, before);
+  assert.deepEqual(calls.map(call => call.table), ["dose_logs"]);
+  assert.equal((calls[0].rows as DoseLog[]).length, 1);
+});
+
+test("new account writes its initial peptides instead of treating examples as synced", async () => {
+  const next = base();
+  const before = { ...next, peptides: [], mixGroups: [], onboardingComplete: false };
+  const { client, calls } = recordingClient();
+  await saveRemoteStore(client, userId, next, before);
+  assert.ok(calls.some(call => call.table === "profiles"));
+  assert.ok(calls.some(call => call.table === "peptides" && (call.rows as unknown[]).length === next.peptides.length));
+  assert.ok(calls.some(call => call.table === "vials"));
+});

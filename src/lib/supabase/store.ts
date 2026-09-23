@@ -15,6 +15,19 @@ export function removedRecordIds<T extends { id: string }>(previous: T[], curren
   return previous.map(item => item.id).filter(id => !currentIds.has(id));
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+export function changedRecords<T>(previous: T[], current: T[], key: (item: T) => string): T[] {
+  const old = new Map(previous.map(item => [key(item), stableJson(item)]));
+  return current.filter(item => old.get(key(item)) !== stableJson(item));
+}
+
 function purchaseItems(value: unknown): PurchasePlanItem[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap(raw => {
@@ -239,6 +252,12 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
 
 export async function saveRemoteStore(client: SupabaseClient, userId: string, input: PeptimeStore, previous: PeptimeStore) {
   const store = normalizeStoreIds(input);
+  const before = normalizeStoreIds(previous);
+  const changedPeptides = changedRecords(before.peptides, store.peptides, item => item.id);
+  const changedGroups = changedRecords(before.mixGroups, store.mixGroups, item => groupKey(item.name));
+  const changedLogs = changedRecords(before.logs, store.logs, item => item.id);
+  const changedNotes = changedRecords(before.dailyNotes, store.dailyNotes, item => item.date);
+  const changedPlans = changedRecords(before.purchasePlans, store.purchasePlans, item => item.id);
   const usedMg = new Map<string, number>();
   store.logs.forEach(log => {
     if (log.status !== "taken") return;
@@ -247,25 +266,34 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
   });
   const frequency = (value: ScheduleFrequency) => value === "weekdays" ? "selected_weekdays" : value;
   const results = [];
-  const profile = { id: userId, language: store.settings.language, timezone: store.settings.timezone, theme: store.settings.theme, syringe_type: store.settings.syringe, day_boundary_hour: store.settings.dayBoundaryHour, onboarding_complete: store.onboardingComplete };
-  let profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled, mass_display_unit: store.settings.massDisplayUnit, custom_daily_tags: store.settings.customDailyTags }, { onConflict: "id" });
-  if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled, mass_display_unit: store.settings.massDisplayUnit }, { onConflict: "id" });
-  if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled }, { onConflict: "id" });
-  if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert(profile, { onConflict: "id" });
-  results.push(profileResult);
-  let mixGroupsSupported = !store.peptides.some(peptide => peptide.mixGroupId);
-  if (store.mixGroups.length) {
-    const mixResult = await client.from("mix_groups").upsert(store.mixGroups.map(group => ({ user_id: userId, name: group.name, name_key: groupKey(group.name), slot: group.slot, clock_time: group.time, frequency: frequency(group.frequency), weekdays: group.weekdays, every_n_days: group.everyNDays ?? null, anchor_date: group.anchorDate ?? null, paused: group.paused, cycle_start: group.cycleStart ?? null, weeks_on: group.weeksOn ?? null, weeks_off: group.weeksOff ?? null, active: true })), { onConflict: "user_id,name_key" });
+  const profileFor = (value: PeptimeStore) => ({ id: userId, language: value.settings.language, timezone: value.settings.timezone, theme: value.settings.theme, syringe_type: value.settings.syringe, day_boundary_hour: value.settings.dayBoundaryHour, onboarding_complete: value.onboardingComplete, reminders_enabled: value.settings.remindersEnabled, mass_display_unit: value.settings.massDisplayUnit, custom_daily_tags: value.settings.customDailyTags });
+  const profile = profileFor(store);
+  if (stableJson(profile) !== stableJson(profileFor(before))) {
+    const { reminders_enabled, mass_display_unit } = profile;
+    const base = { id: userId, language: store.settings.language, timezone: store.settings.timezone, theme: store.settings.theme, syringe_type: store.settings.syringe, day_boundary_hour: store.settings.dayBoundaryHour, onboarding_complete: store.onboardingComplete };
+    let profileResult = await client.from("profiles").upsert(profile, { onConflict: "id" });
+    if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...base, reminders_enabled, mass_display_unit }, { onConflict: "id" });
+    if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...base, reminders_enabled }, { onConflict: "id" });
+    if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert(base, { onConflict: "id" });
+    results.push(profileResult);
+  }
+  let mixGroupsSupported = true;
+  if (changedGroups.length) {
+    const mixResult = await client.from("mix_groups").upsert(changedGroups.map(group => ({ user_id: userId, name: group.name, name_key: groupKey(group.name), slot: group.slot, clock_time: group.time, frequency: frequency(group.frequency), weekdays: group.weekdays, every_n_days: group.everyNDays ?? null, anchor_date: group.anchorDate ?? null, paused: group.paused, cycle_start: group.cycleStart ?? null, weeks_on: group.weeksOn ?? null, weeks_off: group.weeksOff ?? null, active: true })), { onConflict: "user_id,name_key" });
     mixGroupsSupported = !mixResult.error;
     if (mixResult.error && mixResult.error.code !== "PGRST205" && mixResult.error.code !== "42P01") results.push(mixResult);
+  } else if (changedPeptides.some(peptide => peptide.mixGroupId)) {
+    const probe = await client.from("mix_groups").select("name_key").limit(1);
+    mixGroupsSupported = !probe.error;
+    if (probe.error && probe.error.code !== "PGRST205" && probe.error.code !== "42P01") results.push(probe);
   }
-  if (store.peptides.length) {
-    results.push(await client.from("peptides").upsert(store.peptides.map(peptide => ({ id: peptide.id, user_id: userId, name: peptide.name, short_code: peptide.shortCode, color: peptide.color, dose_amount: peptide.doseMcg, dose_unit: "mcg", vial_mg: peptide.vialMg, bac_water_ml: peptide.waterMl, route: peptide.route, fasted: peptide.fasted, fasted_note: peptide.fastedNote, mix_group_id: peptide.mixGroupId ?? null, cycle_start: peptide.mixGroupId ? null : peptide.cycleStart ?? null, weeks_on: peptide.mixGroupId ? null : peptide.weeksOn ?? null, weeks_off: peptide.mixGroupId ? null : peptide.weeksOff ?? null, default_sites: peptide.sites, last_site: peptide.lastSite ?? null, notes: peptide.notes, archived_at: peptide.archived ? new Date().toISOString() : null, is_example: peptide.example })), { onConflict: "id" }));
+  if (changedPeptides.length) {
+    results.push(await client.from("peptides").upsert(changedPeptides.map(peptide => ({ id: peptide.id, user_id: userId, name: peptide.name, short_code: peptide.shortCode, color: peptide.color, dose_amount: peptide.doseMcg, dose_unit: "mcg", vial_mg: peptide.vialMg, bac_water_ml: peptide.waterMl, route: peptide.route, fasted: peptide.fasted, fasted_note: peptide.fastedNote, mix_group_id: peptide.mixGroupId ?? null, cycle_start: peptide.mixGroupId ? null : peptide.cycleStart ?? null, weeks_on: peptide.mixGroupId ? null : peptide.weeksOn ?? null, weeks_off: peptide.mixGroupId ? null : peptide.weeksOff ?? null, default_sites: peptide.sites, last_site: peptide.lastSite ?? null, notes: peptide.notes, archived_at: peptide.archived ? new Date().toISOString() : null, is_example: peptide.example })), { onConflict: "id" }));
     const vialBase = (peptide: Peptide) => ({ id: peptide.id, user_id: userId, peptide_id: peptide.id, bac_water_ml: peptide.waterMl, reconstituted_at: peptide.reconstitutedAt ?? null, beyond_use_days: peptide.beyondUseDays, ...(peptide.reconstitutedAt ? { opened_at: peptide.reconstitutedAt } : {}), closed_at: null });
-    let vialResult = await client.from("vials").upsert(store.peptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.vialMg, remaining_mg: peptide.remainingMg })), { onConflict: "id" });
-    if (vialResult.error?.code === "PGRST204" || vialResult.error?.code === "42703") vialResult = await client.from("vials").upsert(store.peptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.remainingMg + (usedMg.get(peptide.id) ?? 0) })), { onConflict: "id" });
+    let vialResult = await client.from("vials").upsert(changedPeptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.vialMg, remaining_mg: peptide.remainingMg })), { onConflict: "id" });
+    if (vialResult.error?.code === "PGRST204" || vialResult.error?.code === "42703") vialResult = await client.from("vials").upsert(changedPeptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.remainingMg + (usedMg.get(peptide.id) ?? 0) })), { onConflict: "id" });
     results.push(vialResult);
-    const standalone = mixGroupsSupported ? store.peptides.filter(peptide => !peptide.mixGroupId) : store.peptides;
+    const standalone = mixGroupsSupported ? changedPeptides.filter(peptide => !peptide.mixGroupId) : changedPeptides;
     if (standalone.length) {
       const rows = standalone.map(peptide => ({ id: peptide.id, user_id: userId, peptide_id: peptide.id, slot: peptide.slot, clock_time: peptide.time, frequency: frequency(peptide.frequency), weekdays: peptide.weekdays, every_n_days: peptide.everyNDays ?? null, times_per_week: null, starts_on: peptide.anchorDate ?? new Date().toISOString().slice(0, 10), active: !peptide.archived }));
       let scheduleResult = await client.from("schedules").upsert(rows.map((row,index) => ({ ...row, paused: standalone[index].paused })), { onConflict: "id" });
@@ -273,21 +301,21 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
       results.push(scheduleResult);
     }
   }
-  const logRows = store.logs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }));
+  const logRows = changedLogs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }));
   if (logRows.length) {
     const logResult = await client.from("dose_logs").upsert(logRows, { onConflict: "id" });
     results.push(logResult);
   }
-  if (store.dailyNotes.length) {
-    const hasPainValue = store.dailyNotes.some(note => note.painLevel !== undefined);
-    let noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, pain_level: note.painLevel ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
-    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
-    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
-    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" });
+  if (changedNotes.length) {
+    const hasPainValue = changedNotes.some(note => note.painLevel !== undefined);
+    let noteResult = await client.from("daily_notes").upsert(changedNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, pain_level: note.painLevel ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
+    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(changedNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
+    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(changedNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
+    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(changedNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" });
     results.push(noteResult);
   }
-  if (store.purchasePlans.length) {
-    const planResult = await client.from("purchase_plans").upsert(store.purchasePlans.map(plan => ({ id: plan.id, user_id: userId, name: plan.name, items: plan.items, created_at: plan.createdAt, updated_at: plan.updatedAt })), { onConflict: "id" });
+  if (changedPlans.length) {
+    const planResult = await client.from("purchase_plans").upsert(changedPlans.map(plan => ({ id: plan.id, user_id: userId, name: plan.name, items: plan.items, created_at: plan.createdAt, updated_at: plan.updatedAt })), { onConflict: "id" });
     if (planResult.error?.code !== "PGRST205" && planResult.error?.code !== "42P01") {
       results.push(planResult);
     }
@@ -296,12 +324,12 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
   if (error) throw error;
   // Only delete IDs that were loaded here and then explicitly removed. Never
   // compare against every server row: another device may have added records.
-  const removedLogIds = removedRecordIds(previous.logs, store.logs);
+  const removedLogIds = removedRecordIds(before.logs, store.logs);
   for (let index = 0; index < removedLogIds.length; index += 100) {
     const result = await client.from("dose_logs").delete().eq("user_id", userId).in("id", removedLogIds.slice(index, index + 100));
     if (result.error) throw result.error;
   }
-  const removedPlanIds = removedRecordIds(previous.purchasePlans, store.purchasePlans);
+  const removedPlanIds = removedRecordIds(before.purchasePlans, store.purchasePlans);
   if (removedPlanIds.length) {
     const result = await client.from("purchase_plans").delete().eq("user_id", userId).in("id", removedPlanIds);
     if (result.error?.code !== "PGRST205" && result.error?.code !== "42P01") throw result.error;

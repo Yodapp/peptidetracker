@@ -179,7 +179,7 @@ function useStore() {
         // missing from the original tables or logs without a peptide row.
         recoveryMode.current = recovered.recovered || remote.orphanLogCount > 0;
         setRecoveryActive(recoveryMode.current);
-        lastSyncedStore.current = recoveryMode.current ? null : remote.store;
+        lastSyncedStore.current = recoveryMode.current ? null : remote.hasData ? remote.store : { ...remote.store, peptides: [], mixGroups: [], logs: [], dailyNotes: [], purchasePlans: [], todayAdditions: [], onboardingComplete: false };
         const next = recovered.store;
         cached = next.onboardingComplete ? next : cached;
         setSyncError(recoveryMode.current ? "Automatisk kontosynk är pausad för att skydda uppgifterna. Exportera en fullständig kopia i Inställningar." : null);
