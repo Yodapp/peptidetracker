@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader, Surface } from "@/components/peptime-ui";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { defaultInjectionSites, type MixGroupSchedule, type Peptide, type PeptimeStore, type ScheduleFrequency, type Slot } from "@/lib/types";
+import { defaultInjectionSites, syringeUnits, type MixGroupSchedule, type Peptide, type PeptimeStore, type ScheduleFrequency, type Slot } from "@/lib/types";
 
 type Item = Omit<Peptide, "id" | "remainingMg" | "reconstitutedAt" | "lastSite" | "notes" | "archived" | "example">;
 type Saved = { id: string; code: string; name: string; items: Item[]; groups: MixGroupSchedule[]; createdAt: string; updatedAt: string };
@@ -15,6 +15,7 @@ type Preview = { name: string; items: Item[]; groups: MixGroupSchedule[] };
 const slotNames: Record<Slot, string> = { morning: "Morgon", lunch: "Lunch", evening: "Kväll", as_needed: "Vid behov" };
 const weekdayNames = ["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"];
 const key = (value?: string) => value?.trim().toLocaleLowerCase("sv-SE") ?? "";
+const number = (value: number, maximumFractionDigits = 1) => new Intl.NumberFormat("sv-SE", { maximumFractionDigits }).format(value);
 const newCode = () => `P${Array.from(crypto.getRandomValues(new Uint8Array(5)), value => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[value % 32]).join("")}`;
 const emptyItem = (): Item => ({ name: "", shortCode: "", color: "teal", doseMcg: 100, vialMg: 10, waterMl: 2, route: "subcutaneous", slot: "evening", time: "21:00", frequency: "daily", weekdays: [0,1,2,3,4,5,6], paused: false, fasted: false, fastedNote: "", beyondUseDays: 28, sites: [...defaultInjectionSites] });
 const emptySaved = (): Saved => { const now = new Date().toISOString(); return { id: crypto.randomUUID(), code: "", name: "", items: [emptyItem()], groups: [], createdAt: now, updatedAt: now }; };
@@ -23,6 +24,35 @@ const fromRow = (row: Record<string, unknown>): Saved => ({ id: String(row.id), 
 function Decimal({ value, onChange }: { value: number; onChange: (value: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   return <Input className="mt-1.5 h-12 text-base" inputMode="decimal" value={draft ?? String(value)} onFocus={event => { setDraft(event.currentTarget.value); event.currentTarget.select(); }} onChange={event => { const text = event.currentTarget.value; if (!/^\d*(?:[.,]\d*)?$/.test(text)) return; setDraft(text); onChange(Number(text.replace(",", ".")) || 0); }} onBlur={() => setDraft(null)}/>;
+}
+
+function DoseSummary({ item }: { item: Item }) {
+  const units = syringeUnits(item.doseMcg, item.vialMg, item.waterMl);
+  const doses = item.doseMcg > 0 && item.vialMg > 0 ? Math.floor((item.vialMg * 1000) / item.doseMcg) : 0;
+  const days = item.frequency === "daily"
+    ? doses
+    : item.frequency === "weekdays" && item.weekdays.length
+      ? doses * 7 / item.weekdays.length
+      : item.frequency === "every_n_days"
+        ? doses * Math.max(2, item.everyNDays ?? 2)
+        : null;
+  const duration = days === null
+    ? "Tiden beror på hur ofta du tar den"
+    : days > 0
+      ? `Räcker cirka ${number(days, 0)} dagar${days >= 14 ? ` · ${number(days / 7)} veckor` : ""}`
+      : "Fyll i dos, vial och BAC-vatten";
+
+  return <div className="grid grid-cols-2 overflow-hidden rounded-2xl border border-border bg-muted/40">
+    <div className="p-4">
+      <p className="text-xs font-medium text-muted-foreground">U-100 per dos</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums">{number(units)} <span className="text-base">enheter</span></p>
+    </div>
+    <div className="border-l border-border p-4">
+      <p className="text-xs font-medium text-muted-foreground">En vial</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums">{number(doses, 0)} <span className="text-base">doser</span></p>
+    </div>
+    <p className="col-span-2 border-t border-border px-4 py-3 text-sm font-medium">{duration}</p>
+  </div>;
 }
 
 function ScheduleEditor({ item, set }: { item: Item; set: (part: Partial<Item>) => void }) {
@@ -93,7 +123,7 @@ export function ScheduleSharing({ store, update, onBack }: { store: PeptimeStore
     <section className="mb-7"><h2 className="mb-3 text-lg font-semibold">Importera schema</h2><Surface className="p-4"><div className="flex gap-2"><Input className="h-12 uppercase" value={importCode} onChange={event => setImportCode(event.target.value.toUpperCase())} placeholder="Kod, t.ex. P7K3MX"/><Button className="h-12" disabled={busy || !importCode.trim()} onClick={lookup}>Visa</Button></div>{preview && <div className="mt-4 border-t pt-4"><p className="text-lg font-semibold">Importera {preview.name}?</p><p className="mt-1 text-sm text-muted-foreground">{preview.items.length} peptider{duplicates ? ` · ${duplicates} dubbletter hoppas över` : ""}</p><div className="mt-4 grid grid-cols-2 gap-2"><Button variant="outline" className="h-12" onClick={() => setPreview(null)}>Avbryt</Button><Button className="h-12" disabled={busy} onClick={approve}><Check/> Godkänn</Button></div></div>}</Surface></section>
     <section><h2 className="mb-3 text-lg font-semibold">Mina scheman</h2><div className="mb-4 grid grid-cols-[1fr_auto] gap-2"><select className="h-12 min-w-0 rounded-xl border bg-card px-3" value={saved.some(item => item.id === draft.id) ? draft.id : ""} onChange={event => { const item = saved.find(value => value.id === event.target.value); if (item) setDraft(structuredClone(item)); }}><option value="">Nytt schema</option>{saved.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><Button variant="outline" className="h-12" onClick={() => setDraft(emptySaved())}><Plus/> Nytt</Button></div><label className="text-sm font-medium">Namn<Input className="mt-1.5 h-12" value={draft.name} onChange={event => setDraft(value => ({ ...value, name: event.target.value }))} placeholder="Schemats namn"/></label>
       {draft.code && <Surface className="mt-4 flex items-center justify-between p-4"><div><p className="text-sm text-muted-foreground">Delningskod</p><strong className="font-mono text-xl tracking-wider">{draft.code}</strong></div><Button variant="outline" className="h-12" onClick={() => navigator.clipboard.writeText(draft.code).then(() => setMessage("Koden är kopierad."))}><Clipboard/> Kopiera</Button></Surface>}
-      <div className="mt-5 space-y-4">{draft.items.map((item, index) => <Surface key={index} className="space-y-4 p-4"><div className="flex items-center justify-between"><strong>Peptid {index + 1}</strong><Button variant="ghost" size="icon" onClick={() => setDraft(value => ({ ...value, items: value.items.filter((_, position) => position !== index) }))}><Trash2/></Button></div><label className="text-sm font-medium">Namn<Input className="mt-1.5 h-12" value={item.name} onChange={event => setItem(index, { name: event.target.value })}/></label><div className="grid grid-cols-2 gap-3"><label className="text-sm">Dos (mcg)<Decimal value={item.doseMcg} onChange={doseMcg => setItem(index, { doseMcg })}/></label><label className="text-sm">Vial (mg)<Decimal value={item.vialMg} onChange={vialMg => setItem(index, { vialMg })}/></label><label className="text-sm">BAC-vatten (ml)<Decimal value={item.waterMl} onChange={waterMl => setItem(index, { waterMl })}/></label><label className="text-sm">Administrering<select className="mt-1.5 h-12 w-full rounded-xl border bg-card px-3" value={item.route} onChange={event => setItem(index, { route: event.target.value as Item["route"] })}><option value="subcutaneous">Subkutan</option><option value="intranasal">Intranasal</option><option value="oral">Oral</option><option value="topical">Topikal</option></select></label></div><label className="text-sm">Mixgrupp · valfritt<Input className="mt-1.5 h-12" value={item.mixGroupId ?? ""} onChange={event => setItem(index, { mixGroupId: event.target.value || undefined })}/></label><ScheduleEditor item={item} set={part => setItem(index, part)}/></Surface>)}</div>
+      <div className="mt-5 space-y-4">{draft.items.map((item, index) => <Surface key={index} className="space-y-4 p-4"><div className="flex items-center justify-between"><strong>Peptid {index + 1}</strong><Button variant="ghost" size="icon" onClick={() => setDraft(value => ({ ...value, items: value.items.filter((_, position) => position !== index) }))}><Trash2/></Button></div><label className="text-sm font-medium">Namn<Input className="mt-1.5 h-12" value={item.name} onChange={event => setItem(index, { name: event.target.value })}/></label><div className="grid grid-cols-2 gap-3"><label className="text-sm">Dos (mcg)<Decimal value={item.doseMcg} onChange={doseMcg => setItem(index, { doseMcg })}/></label><label className="text-sm">Vial (mg)<Decimal value={item.vialMg} onChange={vialMg => setItem(index, { vialMg })}/></label><label className="text-sm">BAC-vatten (ml)<Decimal value={item.waterMl} onChange={waterMl => setItem(index, { waterMl })}/></label><label className="text-sm">Administrering<select className="mt-1.5 h-12 w-full rounded-xl border bg-card px-3" value={item.route} onChange={event => setItem(index, { route: event.target.value as Item["route"] })}><option value="subcutaneous">Subkutan</option><option value="intranasal">Intranasal</option><option value="oral">Oral</option><option value="topical">Topikal</option></select></label></div><DoseSummary item={item}/><label className="text-sm">Mixgrupp · valfritt<Input className="mt-1.5 h-12" value={item.mixGroupId ?? ""} onChange={event => setItem(index, { mixGroupId: event.target.value || undefined })}/></label><ScheduleEditor item={item} set={part => setItem(index, part)}/></Surface>)}</div>
       <Button variant="outline" className="mt-4 h-12 w-full" onClick={() => setDraft(value => ({ ...value, items: [...value.items, emptyItem()] }))}><Plus/> Lägg till peptid</Button><Button className="mt-5 h-12 w-full" disabled={busy} onClick={save}><Save/> Spara schema</Button>{saved.some(item => item.id === draft.id) && <Button variant="ghost" className="mt-2 h-11 w-full text-destructive" onClick={remove}><Trash2/> Ta bort schema</Button>}</section>
   </>;
 }
