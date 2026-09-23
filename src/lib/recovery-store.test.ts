@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { initialStore } from "./demo-data";
-import { storeFromSyncEntities, visibleRecoveryStore } from "./recovery-store";
+import { missingRecoveryCounts, storeFromSyncEntities, visibleRecoveryStore } from "./recovery-store";
 import { removedRecordIds } from "./supabase/store";
 import type { PeptimeStore } from "./types";
 
@@ -48,4 +48,14 @@ test("today-only selections do not pause account sync", () => {
   const result = visibleRecoveryStore(remote, true, snapshot, undefined, undefined);
   assert.equal(result.recovered, false);
   assert.deepEqual(result.store.todayAdditions, ["2026-09-23:example"]);
+});
+
+test("recovery adds missing IDs without replacing existing server records", () => {
+  const peptide = initialStore.peptides[0];
+  const server = { ...empty, peptides: [{ ...peptide, name: "Server version" }], onboardingComplete: true };
+  const local = { ...server, peptides: [{ ...peptide, name: "Older phone version" }], dailyNotes: [{ date: "2026-09-23", note: "Phone only", tags: [] }] };
+  const result = visibleRecoveryStore(server, true, undefined, local, undefined);
+  assert.equal(result.store.peptides[0].name, "Server version");
+  assert.equal(result.store.dailyNotes.length, 1);
+  assert.deepEqual(missingRecoveryCounts(server, result.store), { peptides: 0, mixGroups: 0, logs: 0, dailyNotes: 1, purchasePlans: 0 });
 });

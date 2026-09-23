@@ -23,7 +23,7 @@ import { groupKey, isDueOn, peptideSchedule, resolvedSchedule, scheduleTargetKey
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { loadRemoteStore, normalizeStoreIds, saveRemoteStore } from "@/lib/supabase/store";
 import { readLocalRecovery } from "@/lib/local-recovery";
-import { storeFromSyncEntities, visibleRecoveryStore } from "@/lib/recovery-store";
+import { missingRecoveryCounts, storeFromSyncEntities, visibleRecoveryStore, type RecoveryCounts } from "@/lib/recovery-store";
 import { clampInventoryMg, deleteDoseLog, replaceDoseLog } from "@/lib/inventory";
 
 const STORAGE_KEY = "peptime-demo-v1";
@@ -132,6 +132,7 @@ function useStore() {
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const [recoveryActive, setRecoveryActive] = useState(false);
+  const [recoveryCounts, setRecoveryCounts] = useState<RecoveryCounts | null>(null);
   const clientRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   const userIdRef = useRef<string | null>(null);
   const skipFirstSync = useRef(false);
@@ -179,7 +180,9 @@ function useStore() {
         // missing from the original tables or logs without a peptide row.
         recoveryMode.current = recovered.recovered || remote.orphanLogCount > 0;
         setRecoveryActive(recoveryMode.current);
-        lastSyncedStore.current = recoveryMode.current ? null : remote.hasData ? remote.store : { ...remote.store, peptides: [], mixGroups: [], logs: [], dailyNotes: [], purchasePlans: [], todayAdditions: [], onboardingComplete: false };
+        const remoteBaseline = remote.hasData ? remote.store : { ...remote.store, peptides: [], mixGroups: [], logs: [], dailyNotes: [], purchasePlans: [], todayAdditions: [], onboardingComplete: false };
+        setRecoveryCounts(recoveryMode.current ? missingRecoveryCounts(remoteBaseline, recovered.store) : null);
+        lastSyncedStore.current = recoveryMode.current ? null : remoteBaseline;
         const next = recovered.store;
         cached = next.onboardingComplete ? next : cached;
         setSyncError(recoveryMode.current ? "Automatisk kontosynk är pausad för att skydda uppgifterna. Exportera en fullständig kopia i Inställningar." : null);
@@ -246,7 +249,28 @@ function useStore() {
     if (clientRef.current && userIdRef.current && ready) setSaveAttempt(value => value + 1);
     else setHydrateAttempt(value => value + 1);
   };
-  return [store, setStore, ready, syncState, retrySync, syncError, activeUserId, recoveryActive] as const;
+  const restoreMissingRecords = async () => {
+    if (!recoveryMode.current || !clientRef.current || !userIdRef.current) return;
+    try {
+      setSyncState("syncing");
+      const remote = await loadRemoteStore(clientRef.current, store);
+      const baseline = remote.hasData ? remote.store : { ...remote.store, peptides: [], mixGroups: [], logs: [], dailyNotes: [], purchasePlans: [], todayAdditions: [], onboardingComplete: false };
+      const merged = visibleRecoveryStore(baseline, remote.hasData, undefined, store, undefined).store;
+      const ids = new Set(merged.peptides.map(peptide => peptide.id));
+      if (merged.logs.some(log => !ids.has(log.peptideId))) throw new Error("En logg saknar sin peptid. Ingen återställning gjordes.");
+      const counts = missingRecoveryCounts(baseline, merged);
+      setRecoveryCounts(counts);
+      if (Object.values(counts).some(count => count > 0) || merged.onboardingComplete !== baseline.onboardingComplete) {
+        await saveRemoteStore(clientRef.current, userIdRef.current, merged, baseline);
+      }
+      setHydrateAttempt(value => value + 1);
+    } catch (error) {
+      console.error("Peptime account recovery error", error);
+      setSyncError(syncErrorMessage(error));
+      setSyncState("error");
+    }
+  };
+  return [store, setStore, ready, syncState, retrySync, syncError, activeUserId, recoveryActive, recoveryCounts, restoreMissingRecords] as const;
 }
 
 function BottomNav({ view, setView }: { view: string; setView: (view: string) => void }) {
@@ -447,7 +471,7 @@ function CalendarView({ store, update, onBack }: { store: PeptimeStore; update: 
 }
 
 export function PeptimeApp({ userEmail }: { userEmail?: string }) {
-  const [store,update,ready,syncState,retrySync,syncError,userId,recoveryActive]=useStore(); const [view,setView]=useState("today");
+  const [store,update,ready,syncState,retrySync,syncError,userId,recoveryActive,recoveryCounts,restoreMissingRecords]=useStore(); const [view,setView]=useState("today");
   const [insightPeptideId,setInsightPeptideId]=useState<string|null>(null);
   const [insightReturnView,setInsightReturnView]=useState<"peptides"|"insights">("peptides");
   const [calendarReturnView,setCalendarReturnView]=useState<"today"|"insights">("today");
@@ -456,5 +480,5 @@ export function PeptimeApp({ userEmail }: { userEmail?: string }) {
   useEffect(()=>{const media=window.matchMedia("(prefers-color-scheme: dark)");const apply=()=>{const mode=store.settings.themeMode??"system";document.documentElement.classList.toggle("dark",mode==="dark"||(mode==="system"&&media.matches))};apply();media.addEventListener("change",apply);return()=>media.removeEventListener("change",apply)},[store.settings.themeMode]);
   if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><RotateCcw className="mx-auto size-7 text-muted-foreground"/><h1 className="mt-4 text-xl font-medium">Kunde inte hämta ditt konto</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p>{syncError&&<p className="mt-3 break-words text-sm text-destructive">{syncError}</p>}<Button className="mt-5 h-12 w-full" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
   if(!store.onboardingComplete)return <Onboarding store={store} update={update}/>;
-  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{recoveryActive&&<button type="button" onClick={()=>setView("settings")} className="mt-4 w-full rounded-2xl border border-amber-600/40 bg-amber-500/10 p-3 text-left text-sm leading-5 text-foreground">Återställningsläge aktivt. Kontosynk är pausad för att skydda uppgifterna. Exportera data i Inställningar.</button>}{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} update={update} onBack={()=>setView("peptides")}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId} preserveLocal={recoveryActive}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
+  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{recoveryActive&&<button type="button" onClick={()=>setView("settings")} className="mt-4 w-full rounded-2xl border border-amber-600/40 bg-amber-500/10 p-3 text-left text-sm leading-5 text-foreground">Återställningsläge aktivt. Kontosynk är pausad för att skydda uppgifterna. Exportera data i Inställningar.</button>}{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} update={update} onBack={()=>setView("peptides")}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId} preserveLocal={recoveryActive} recoveryCounts={recoveryCounts} restoreMissingRecords={restoreMissingRecords}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
 }

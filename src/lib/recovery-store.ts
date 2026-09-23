@@ -2,6 +2,7 @@ import type { PeptimeStore } from "@/lib/types";
 import { groupKey } from "@/lib/schedule";
 
 type Collection = "peptides" | "mixGroups" | "logs" | "dailyNotes" | "purchasePlans";
+export type RecoveryCounts = Record<Collection, number>;
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -44,6 +45,18 @@ function key(collection: Collection, item: unknown): string | undefined {
 
 function meaningful(store: PeptimeStore | undefined): store is PeptimeStore {
   return Boolean(store && validStore(store) && (store.onboardingComplete || store.peptides.length || store.logs.length || store.dailyNotes.length || store.purchasePlans.length));
+}
+
+/** Count only IDs absent from the latest relational account state. */
+export function missingRecoveryCounts(remote: PeptimeStore, visible: PeptimeStore): RecoveryCounts {
+  const collections: Collection[] = ["peptides", "mixGroups", "logs", "dailyNotes", "purchasePlans"];
+  return Object.fromEntries(collections.map(collection => {
+    const existing = new Set(remote[collection].map(item => key(collection, item)));
+    return [collection, visible[collection].filter(item => {
+      const id = key(collection, item);
+      return Boolean(id && !existing.has(id));
+    }).length];
+  })) as RecoveryCounts;
 }
 
 /** Show missing IDs from preserved copies without replacing matching server records. */

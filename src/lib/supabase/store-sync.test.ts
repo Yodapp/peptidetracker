@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { initialStore } from "../demo-data";
+import { visibleRecoveryStore } from "../recovery-store";
 import type { DoseLog } from "../types";
 import { changedRecords, normalizeStoreIds, saveRemoteStore } from "./store";
 
@@ -56,4 +57,19 @@ test("new account writes its initial peptides instead of treating examples as sy
   assert.ok(calls.some(call => call.table === "profiles"));
   assert.ok(calls.some(call => call.table === "peptides" && (call.rows as unknown[]).length === next.peptides.length));
   assert.ok(calls.some(call => call.table === "vials"));
+});
+
+test("account recovery inserts missing records without rewriting existing rows", async () => {
+  const initial = base();
+  const peptide = initial.peptides[0];
+  const existing: DoseLog = { id: "22222222-2222-4222-8222-222222222222", peptideId: peptide.id, peptideName: peptide.name, plannedDose: 100, actualDose: 100, unit: "mcg", computedIu: 4, slot: "morning", takenAt: "2026-09-22T08:00:00.000Z", scheduledDate: "2026-09-22", status: "taken", note: "Server version" };
+  const added: DoseLog = { ...existing, id: "33333333-3333-4333-8333-333333333333", takenAt: "2026-09-23T08:00:00.000Z", scheduledDate: "2026-09-23", note: "Phone only" };
+  const before = { ...initial, logs: [existing] };
+  const phone = { ...before, logs: [{ ...existing, note: "Old phone version" }, added], dailyNotes: [{ date: "2026-09-23", note: "Phone only", tags: [] }] };
+  const merged = visibleRecoveryStore(before, true, undefined, phone, undefined).store;
+  const { client, calls } = recordingClient();
+  await saveRemoteStore(client, userId, merged, before);
+  assert.deepEqual(calls.map(call => call.table), ["dose_logs", "daily_notes"]);
+  assert.deepEqual((calls[0].rows as DoseLog[]).map(row => row.id), [added.id]);
+  assert.equal(merged.logs[0].note, "Server version");
 });
