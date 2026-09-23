@@ -178,13 +178,13 @@ export function topPatterns(store: PeptimeStore, period: InsightPeriod, today: s
     for (const metric of metricDefinitions) {
       const windows: InsightWindow[] = metric.key === "sleepQuality" ? ["next_day"] : ["same_day", "next_day"];
       for (const window of windows) {
-        const comparison = compareMetric(store, exposure, metric.key, window, period, today);
+        const comparison = compareMetric(store, exposure, metric.key, window, period, today, 8);
         if (comparison.difference !== null && Math.abs(comparison.difference) >= 0.5) candidates.push({ exposure, window, comparison, score: Math.abs(comparison.difference) / 4 });
       }
     }
     for (const tag of tags) {
       for (const window of ["same_day", "next_day"] as const) {
-        const comparison = compareTag(store, exposure, tag, window, period, today);
+        const comparison = compareTag(store, exposure, tag, window, period, today, 8);
         if (comparison.difference !== null && Math.abs(comparison.difference) >= 0.25) candidates.push({ exposure, window, comparison, score: Math.abs(comparison.difference) });
       }
     }

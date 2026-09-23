@@ -10,7 +10,7 @@ Peptime is a private, mobile-first peptide research logger. The interface is Swe
 - One-handed Today flow with mix-group cards, two-tap Take logging, optional site picker, Skip, one-time adjustment, and 30-second undo
 - Automatic concentration and U-100 calculation: `dose_mcg / (vial_mg / water_ml * 1000) * 100`
 - Compact per-IU mass comparison on Today, selectable as mcg or mg without showing both at once
-- Supabase-backed cross-device storage with local cache, installable PWA shell, light/dark mode, and daily autosave note
+- Supabase-backed cross-device storage with an IndexedDB change queue, conflict review, installable offline PWA shell, light/dark mode, and daily autosave note
 - History with filters and edit/delete, peptide/vial editor and archive, monthly calendar, CSV/JSON export
 - Injection-site body map showing per-site history; per-peptide dose charts and an Insights view with activity, weekly totals, and daily tags
 - Supabase email magic-link authentication with an in-PWA email-code fallback and RLS on every user table
@@ -19,6 +19,7 @@ Peptime is a private, mobile-first peptide research logger. The interface is Swe
 - Case-insensitive mix groups with suggestions from existing groups
 - Named purchase plans with 30/60-day vial and BAC totals, automatic mcg/mg conversion, U-100 math, and PNG sharing
 - Schedule-aware low-inventory warning when an active peptide has about 15 days or less remaining
+- Route-aware dose display, retrospective dose logging, and preserved history when opening a new vial
 
 No doses or protocols in the example data are recommendations. They are UI demonstration rows only and are labeled as examples in the app.
 
@@ -31,12 +32,12 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. Without Supabase environment variables, Peptime runs in demo mode and persists to browser `localStorage`.
+Open `http://localhost:3000`. Without Supabase environment variables, Peptime runs in demo mode and persists to browser IndexedDB.
 
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql). This creates `profiles`, `peptides`, `vials`, `schedules`, `dose_logs`, `daily_notes`, and `purchase_plans`, enables Row Level Security, and adds per-user policies.
+2. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql). This creates the legacy tables plus the revision-checked `sync_state` and `sync_receipts` tables, enables Row Level Security, and adds per-user policies.
 3. In **Authentication → URL Configuration**, set the Site URL and add both local and production callback URLs:
    - `http://localhost:3000/auth/callback`
    - `https://YOUR_VERCEL_DOMAIN/auth/callback`
@@ -48,7 +49,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
 
-When these variables exist, the root route is private and unauthenticated users are sent to the magic-link login screen. Peptides, schedules, vial state, logs, daily notes, and settings sync to Supabase under the authenticated user. RLS remains the security boundary.
+When these variables exist, the root route is private and unauthenticated users are sent to the magic-link login screen. The first launch copies existing relational data into `sync_state`; later changes sync as individual revision-checked records. Conflicting edits remain on the device until the user chooses a version in Settings. RLS remains the security boundary.
 
 For iPhone Home Screen login, keep the magic link and also expose the email OTP in **Authentication → Email Templates → Magic Link**. The template can use both the existing confirmation URL and `{{ .Token }}`. A minimal addition is: `Engångskod: {{ .Token }}`. The user can enter that code inside the installed Peptime PWA, so the session is created in the PWA rather than in Safari.
 
@@ -69,10 +70,11 @@ Run these migrations once, in order, in Supabase SQL Editor before deploying thi
 9. [`supabase/migrations/202609200001_daily_checkin.sql`](supabase/migrations/202609200001_daily_checkin.sql)
 10. [`supabase/migrations/20260921203002_pain_level.sql`](supabase/migrations/20260921203002_pain_level.sql)
 11. [`supabase/migrations/20260922170000_shared_schedules.sql`](supabase/migrations/20260922170000_shared_schedules.sql)
+12. [`supabase/migrations/202609230001_offline_sync.sql`](supabase/migrations/202609230001_offline_sync.sql)
 
 The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary. The fourth syncs the user's mcg/mg display preference. Migration 8 separates vial size from remaining inventory and adds RLS-protected saved purchase plans. Migrations 9 and 10 add the daily check-in scales, including pain. Migration 11 adds reusable shared peptide schedules and code-based imports.
 
-On the first signed-in load after upgrading, Peptime uploads existing browser data if the remote account is empty. It also merges locally added peptides if another device reached the account first.
+Apply migration 12 **before** deploying this app version. On first signed-in load, Peptime initializes revision-checked sync from the existing account. Existing browser data is migrated from `localStorage` into IndexedDB; differing versions are kept for review in Settings. Old open app tabs should be reloaded after deployment because they still use the previous relational sync path.
 
 ## Deploy to Vercel
 
@@ -91,11 +93,12 @@ Production delivery still needs a server-side Web Push scheduler. Configure VAPI
 
 ## Data and privacy notes
 
-- With Supabase configured, the local browser store is an offline-tolerant, unencrypted cache and Supabase is the cross-device source of truth. Peptime clears its local data and app caches on sign-out.
+- With Supabase configured, IndexedDB keeps an unencrypted offline copy and a durable queue of pending changes; Supabase is the cross-device source of truth. Signing out with pending changes requires syncing or downloading a full backup first. Peptime clears local data and app caches on sign-out.
 - Without Supabase variables, Peptime continues to work as a device-local demo.
-- Supabase tables use RLS and reject rows that do not belong to `auth.uid()`.
+- Supabase tables use RLS and reject rows that do not belong to `auth.uid()`. The sync RPCs use server-side revision checks and mutation receipts to prevent silent overwrites and duplicate retries.
 - Peptides with logs should be archived instead of deleted. The schema uses restrictive foreign keys for logged peptide records.
 - CSV and JSON exports are generated entirely in the browser.
+- Full JSON backups include all app data and can be imported from Settings. A browser can still evict offline storage under pressure; keep a backup of important data.
 
 ## Scripts
 

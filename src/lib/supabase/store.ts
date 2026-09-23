@@ -21,6 +21,7 @@ function purchaseItems(value: unknown): PurchasePlanItem[] {
     return [{
       id: uuidPattern.test(text(item.id)) ? text(item.id) : uuid(),
       name,
+      route: item.route === "intranasal" || item.route === "oral" || item.route === "topical" ? item.route : "subcutaneous",
       vialMg: Math.max(0, number(item.vialMg)),
       doseMcg: Math.max(0, number(item.doseMcg)),
       doseEntryUnit: item.doseEntryUnit === "mg" ? "mg" as const : "mcg" as const,
@@ -49,49 +50,34 @@ export function normalizeStoreIds(store: PeptimeStore): PeptimeStore {
       sites: normalizeInjectionSites(peptide.sites ?? []),
     };
   });
+  const vialIds = new Map<string, string>();
+  const vials = (store.vials ?? []).map(vial => {
+    const id = uuidPattern.test(vial.id) ? vial.id : uuid();
+    vialIds.set(vial.id, id);
+    return { ...vial, id, peptideId: ids.get(vial.peptideId) ?? vial.peptideId };
+  });
+  for (const peptide of peptides) {
+    let current = vials.filter(vial => vial.peptideId === peptide.id && !vial.closedAt).sort((a, b) => b.openedAt.localeCompare(a.openedAt))[0];
+    if (!current) {
+      current = { id: vials.some(vial => vial.id === peptide.id) ? uuid() : peptide.id, peptideId: peptide.id, initialMg: peptide.vialMg, remainingMg: peptide.remainingMg, waterMl: peptide.waterMl, openedAt: peptide.reconstitutedAt ?? new Date().toISOString(), reconstitutedAt: peptide.reconstitutedAt, beyondUseDays: peptide.beyondUseDays };
+      vials.push(current);
+    }
+    peptide.currentVialId = current.id;
+  }
   const validIds = new Set(peptides.map(peptide => peptide.id));
   const logs = store.logs
-    .map(log => ({ ...log, id: uuidPattern.test(log.id) ? log.id : uuid(), peptideId: ids.get(log.peptideId) ?? log.peptideId, scheduledDate: log.scheduledDate ?? effectiveLogDate(log.takenAt, dayBoundaryHour) }))
+    .map(log => ({ ...log, id: uuidPattern.test(log.id) ? log.id : uuid(), peptideId: ids.get(log.peptideId) ?? log.peptideId, vialId: log.vialId ? vialIds.get(log.vialId) ?? ids.get(log.vialId) ?? log.vialId : undefined, scheduledDate: log.scheduledDate ?? effectiveLogDate(log.takenAt, dayBoundaryHour) }))
     .filter(log => validIds.has(log.peptideId));
   return {
     ...store,
     peptides,
+    vials,
     mixGroups: (store.mixGroups ?? []).map(group => ({ ...group, weekdays: group.weekdays ?? [], paused: group.paused ?? false })),
     logs,
     dailyNotes: (store.dailyNotes ?? []).map(note => ({ ...note, tags: note.tags ?? [] })),
     purchasePlans: (store.purchasePlans ?? []).map(plan => ({ ...plan, id: uuidPattern.test(plan.id) ? plan.id : uuid(), items: purchaseItems(plan.items), createdAt: plan.createdAt ?? new Date().toISOString(), updatedAt: plan.updatedAt ?? new Date().toISOString() })),
     todayAdditions: store.todayAdditions ?? [],
     settings: { ...store.settings, customDailyTags: store.settings.customDailyTags ?? [], themeMode: store.settings.themeMode ?? "system", massDisplayUnit: store.settings.massDisplayUnit === "mg" ? "mg" : "mcg", dayBoundaryHour, remindersEnabled: store.settings.remindersEnabled ?? false },
-  };
-}
-
-export function mergeStores(remote: PeptimeStore, local: PeptimeStore) {
-  const peptideNames = new Map(remote.peptides.map(peptide => [peptide.name.trim().toLocaleLowerCase("sv-SE"), peptide]));
-  const idMap = new Map<string, string>();
-  const additions: Peptide[] = [];
-  local.peptides.forEach(peptide => {
-    const match = peptideNames.get(peptide.name.trim().toLocaleLowerCase("sv-SE"));
-    if (match) idMap.set(peptide.id, match.id);
-    else { idMap.set(peptide.id, peptide.id); additions.push(peptide); }
-  });
-  const remoteLogIds = new Set(remote.logs.map(log => log.id));
-  const localLogs = local.logs
-    .filter(log => !remoteLogIds.has(log.id))
-    .map(log => ({ ...log, peptideId: idMap.get(log.peptideId) ?? log.peptideId }))
-    .filter(log => [...remote.peptides, ...additions].some(peptide => peptide.id === log.peptideId));
-  const notes = new Map(local.dailyNotes.map(note => [note.date, note]));
-  remote.dailyNotes.forEach(note => notes.set(note.date, note));
-  const remotePlanIds = new Set(remote.purchasePlans.map(plan => plan.id));
-  return {
-    ...remote,
-    peptides: [...remote.peptides, ...additions],
-    mixGroups: [...new Map([...local.mixGroups, ...remote.mixGroups].map(group => [groupKey(group.name), group])).values()],
-    logs: [...remote.logs, ...localLogs],
-    dailyNotes: [...notes.values()],
-    purchasePlans: [...remote.purchasePlans, ...local.purchasePlans.filter(plan => !remotePlanIds.has(plan.id))],
-    todayAdditions: [...new Set([...remote.todayAdditions, ...local.todayAdditions])],
-    settings: { ...remote.settings, customDailyTags: [...new Set([...(local.settings.customDailyTags ?? []), ...(remote.settings.customDailyTags ?? [])])] },
-    onboardingComplete: remote.onboardingComplete || local.onboardingComplete,
   };
 }
 
@@ -135,6 +121,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
     const frequency: ScheduleFrequency = schedule?.frequency === "selected_weekdays" ? "weekdays" : schedule?.frequency === "every_n_days" ? "every_n_days" : schedule?.frequency === "as_needed" ? "as_needed" : "daily";
     return {
       id: row.id,
+      currentVialId: vial?.id ?? row.id,
       name: row.name,
       shortCode: row.short_code,
       color: row.color,
@@ -209,6 +196,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
 
   const store: PeptimeStore = {
     peptides,
+    vials: vialRows.map(row => ({ id: row.id, peptideId: row.peptide_id, initialMg: number(row.initial_mg), remainingMg: number(row.remaining_mg, number(row.initial_mg)), waterMl: number(row.bac_water_ml), openedAt: row.opened_at ?? row.reconstituted_at ?? new Date().toISOString(), reconstitutedAt: row.reconstituted_at ?? undefined, beyondUseDays: number(row.beyond_use_days, 28) })),
     mixGroups,
     logs,
     dailyNotes: noteRows.map(row => ({ date: row.note_date, note: row.note, tags: (row.tags ?? []) as DailyTagId[], sleepQuality: row.sleep_quality ?? undefined, brainFatigue: row.brain_fatigue ?? undefined, physicalFatigue: row.physical_fatigue ?? undefined, painLevel: row.pain_level ?? undefined, activityLevel: row.activity_level ?? undefined })),
@@ -229,89 +217,4 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
   };
   const hasData = Boolean(profile?.onboarding_complete || peptideRows.length || logRows.length || noteRows.length || purchasePlanRows.length);
   return { store: hasData ? store : normalizeStoreIds(fallback), hasData };
-}
-
-export async function saveRemoteStore(client: SupabaseClient, userId: string, input: PeptimeStore) {
-  const store = normalizeStoreIds(input);
-  const usedMg = new Map<string, number>();
-  store.logs.forEach(log => {
-    if (log.status !== "taken") return;
-    const amountMg = log.unit === "mg" ? log.actualDose : log.actualDose / 1000;
-    usedMg.set(log.peptideId, (usedMg.get(log.peptideId) ?? 0) + amountMg);
-  });
-  const frequency = (value: ScheduleFrequency) => value === "weekdays" ? "selected_weekdays" : value;
-  const results = [];
-  const profile = { id: userId, language: store.settings.language, timezone: store.settings.timezone, theme: store.settings.theme, syringe_type: store.settings.syringe, day_boundary_hour: store.settings.dayBoundaryHour, onboarding_complete: store.onboardingComplete };
-  let profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled, mass_display_unit: store.settings.massDisplayUnit, custom_daily_tags: store.settings.customDailyTags }, { onConflict: "id" });
-  if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled, mass_display_unit: store.settings.massDisplayUnit }, { onConflict: "id" });
-  if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert({ ...profile, reminders_enabled: store.settings.remindersEnabled }, { onConflict: "id" });
-  if (profileResult.error?.code === "PGRST204" || profileResult.error?.code === "42703") profileResult = await client.from("profiles").upsert(profile, { onConflict: "id" });
-  results.push(profileResult);
-  let mixGroupsSupported = !store.peptides.some(peptide => peptide.mixGroupId);
-  if (store.mixGroups.length) {
-    const mixResult = await client.from("mix_groups").upsert(store.mixGroups.map(group => ({ user_id: userId, name: group.name, name_key: groupKey(group.name), slot: group.slot, clock_time: group.time, frequency: frequency(group.frequency), weekdays: group.weekdays, every_n_days: group.everyNDays ?? null, anchor_date: group.anchorDate ?? null, paused: group.paused, cycle_start: group.cycleStart ?? null, weeks_on: group.weeksOn ?? null, weeks_off: group.weeksOff ?? null, active: true })), { onConflict: "user_id,name_key" });
-    mixGroupsSupported = !mixResult.error;
-    if (mixResult.error && mixResult.error.code !== "PGRST205" && mixResult.error.code !== "42P01") results.push(mixResult);
-  }
-  if (store.peptides.length) {
-    results.push(await client.from("peptides").upsert(store.peptides.map(peptide => ({ id: peptide.id, user_id: userId, name: peptide.name, short_code: peptide.shortCode, color: peptide.color, dose_amount: peptide.doseMcg, dose_unit: "mcg", vial_mg: peptide.vialMg, bac_water_ml: peptide.waterMl, route: peptide.route, fasted: peptide.fasted, fasted_note: peptide.fastedNote, mix_group_id: peptide.mixGroupId ?? null, cycle_start: peptide.mixGroupId ? null : peptide.cycleStart ?? null, weeks_on: peptide.mixGroupId ? null : peptide.weeksOn ?? null, weeks_off: peptide.mixGroupId ? null : peptide.weeksOff ?? null, default_sites: peptide.sites, last_site: peptide.lastSite ?? null, notes: peptide.notes, archived_at: peptide.archived ? new Date().toISOString() : null, is_example: peptide.example })), { onConflict: "id" }));
-    const vialBase = (peptide: Peptide) => ({ id: peptide.id, user_id: userId, peptide_id: peptide.id, bac_water_ml: peptide.waterMl, reconstituted_at: peptide.reconstitutedAt ?? null, beyond_use_days: peptide.beyondUseDays, ...(peptide.reconstitutedAt ? { opened_at: peptide.reconstitutedAt } : {}), closed_at: null });
-    let vialResult = await client.from("vials").upsert(store.peptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.vialMg, remaining_mg: peptide.remainingMg })), { onConflict: "id" });
-    if (vialResult.error?.code === "PGRST204" || vialResult.error?.code === "42703") vialResult = await client.from("vials").upsert(store.peptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.remainingMg + (usedMg.get(peptide.id) ?? 0) })), { onConflict: "id" });
-    results.push(vialResult);
-    const standalone = mixGroupsSupported ? store.peptides.filter(peptide => !peptide.mixGroupId) : store.peptides;
-    const groupedIds = store.peptides.filter(peptide => peptide.mixGroupId).map(peptide => peptide.id);
-    if (standalone.length) {
-      const rows = standalone.map(peptide => ({ id: peptide.id, user_id: userId, peptide_id: peptide.id, slot: peptide.slot, clock_time: peptide.time, frequency: frequency(peptide.frequency), weekdays: peptide.weekdays, every_n_days: peptide.everyNDays ?? null, times_per_week: null, starts_on: peptide.anchorDate ?? new Date().toISOString().slice(0, 10), active: !peptide.archived }));
-      let scheduleResult = await client.from("schedules").upsert(rows.map((row,index) => ({ ...row, paused: standalone[index].paused })), { onConflict: "id" });
-      if (scheduleResult.error?.code === "PGRST204" || scheduleResult.error?.code === "42703") scheduleResult = await client.from("schedules").upsert(rows, { onConflict: "id" });
-      results.push(scheduleResult);
-    }
-    if (mixGroupsSupported && groupedIds.length) results.push(await client.from("schedules").delete().in("peptide_id", groupedIds));
-  }
-  const logRows = store.logs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }));
-  if (logRows.length) {
-    const logResult = await client.from("dose_logs").upsert(logRows, { onConflict: "id" });
-    results.push(logResult);
-    if (!logResult.error) {
-      const existingResult = await client.from("dose_logs").select("id").eq("user_id", userId);
-      results.push(existingResult);
-      if (!existingResult.error) {
-        const localIds = new Set(logRows.map(row => row.id));
-        const staleIds = (existingResult.data ?? []).map(row => row.id).filter(id => !localIds.has(id));
-        for (let index = 0; index < staleIds.length; index += 100) results.push(await client.from("dose_logs").delete().in("id", staleIds.slice(index, index + 100)));
-      }
-    }
-  } else {
-    results.push(await client.from("dose_logs").delete().eq("user_id", userId));
-  }
-  if (store.dailyNotes.length) {
-    const hasPainValue = store.dailyNotes.some(note => note.painLevel !== undefined);
-    let noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, pain_level: note.painLevel ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
-    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags, sleep_quality: note.sleepQuality ?? null, brain_fatigue: note.brainFatigue ?? null, physical_fatigue: note.physicalFatigue ?? null, activity_level: note.activityLevel ?? null })), { onConflict: "user_id,note_date" });
-    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note, tags: note.tags })), { onConflict: "user_id,note_date" });
-    if (!hasPainValue && (noteResult.error?.code === "PGRST204" || noteResult.error?.code === "42703")) noteResult = await client.from("daily_notes").upsert(store.dailyNotes.map(note => ({ user_id: userId, note_date: note.date, note: note.note })), { onConflict: "user_id,note_date" });
-    results.push(noteResult);
-  }
-  if (store.purchasePlans.length) {
-    const planResult = await client.from("purchase_plans").upsert(store.purchasePlans.map(plan => ({ id: plan.id, user_id: userId, name: plan.name, items: plan.items, created_at: plan.createdAt, updated_at: plan.updatedAt })), { onConflict: "id" });
-    if (planResult.error?.code !== "PGRST205" && planResult.error?.code !== "42P01") {
-      results.push(planResult);
-      if (!planResult.error) {
-        const existingResult = await client.from("purchase_plans").select("id").eq("user_id", userId);
-        results.push(existingResult);
-        if (!existingResult.error) {
-          const localIds = new Set(store.purchasePlans.map(plan => plan.id));
-          const staleIds = (existingResult.data ?? []).map(row => row.id).filter(id => !localIds.has(id));
-          if (staleIds.length) results.push(await client.from("purchase_plans").delete().in("id", staleIds));
-        }
-      }
-    }
-  } else {
-    const deletePlansResult = await client.from("purchase_plans").delete().eq("user_id", userId);
-    if (deletePlansResult.error?.code !== "PGRST205" && deletePlansResult.error?.code !== "42P01") results.push(deletePlansResult);
-  }
-  const error = results.find(result => result.error)?.error;
-  if (error) throw error;
-  return store;
 }

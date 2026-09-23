@@ -11,6 +11,7 @@ export const examplePeptides: Peptide[] = [
 
 export const initialStore: PeptimeStore = {
   peptides: examplePeptides,
+  vials: [],
   mixGroups: [{ name: "evening-mix", slot: "evening", time: "21:00", frequency: "daily", weekdays: [0,1,2,3,4,5,6], paused: false }],
   logs: [],
   dailyNotes: [],
