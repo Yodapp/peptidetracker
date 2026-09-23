@@ -173,8 +173,11 @@ function useStore() {
         const serverCopy = storeFromSyncEntities(syncSnapshot.data?.entities, remote.store);
         const scopedCopy = scopedSaved ? local : !remote.hasData && saved ? local : undefined;
         const recovered = visibleRecoveryStore(remote.store, remote.hasData, serverCopy, deviceSnapshot?.store, scopedCopy);
-        const hasUnresolvedChanges = Boolean(deviceSnapshot?.pending?.length || deviceSnapshot?.conflicts?.length);
-        recoveryMode.current = recovered.recovered || hasUnresolvedChanges || remote.orphanLogCount > 0;
+        // The retired sync client generated false conflicts when it compared
+        // differently normalized copies of the same records. Keep its snapshot
+        // available for export, but pause writes only for records actually
+        // missing from the original tables or logs without a peptide row.
+        recoveryMode.current = recovered.recovered || remote.orphanLogCount > 0;
         setRecoveryActive(recoveryMode.current);
         lastSyncedStore.current = recoveryMode.current ? null : remote.store;
         const next = recovered.store;
