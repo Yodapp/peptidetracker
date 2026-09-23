@@ -49,7 +49,7 @@ export function SettingsView({ store, update, syncState, retrySync, syncError, u
       form.submit();
     }
   };
-  const syncText=syncState==="synced"?"Synkad med ditt konto":syncState==="syncing"?"Synkar…":syncState==="error"?"Synkfel · sparat på den här enheten":"Sparas på den här enheten";
+  const syncText=preserveLocal?"Återställningsläge · kontosynk pausad":syncState==="synced"?"Synkad med ditt konto":syncState==="syncing"?"Synkar…":syncState==="error"?"Synkfel · sparat på den här enheten":"Sparas på den här enheten";
   return <><PageHeader eyebrow="Peptime" title="Inställningar"/>
     <div className="space-y-7">
       <section><SectionHeading title="Dosering"/><Surface className="divide-y divide-border"><Row label="Spruta" detail={`Max ${syringeCapacity(store.settings.syringe)} IU`}><select className="bg-transparent text-[15px] text-primary" value={store.settings.syringe} onChange={e=>update(s=>({...s,settings:{...s.settings,syringe:e.target.value as PeptimeStore["settings"]["syringe"]}}))}><option>U-100 0.3 ml</option><option>U-100 0.5 ml</option><option>U-100 1 ml</option></select></Row><Row label="Visad viktenhet"><select className="bg-transparent text-[15px] text-primary" value={store.settings.massDisplayUnit} onChange={e=>update(s=>({...s,settings:{...s.settings,massDisplayUnit:e.target.value as "mcg"|"mg"}}))}><option value="mcg">mcg</option><option value="mg">mg</option></select></Row></Surface><p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">På U-100 motsvarar 1 IU-markering alltid 0,01 ml.</p></section>
