@@ -19,6 +19,7 @@ const card = "rounded-[22px] border border-border/80 bg-card p-5 shadow-[0_1px_2
 type BodySite = { name: string; side: "front" | "back"; x: number; y: number };
 const bodySites: BodySite[] = [
   { name: "Buk vänster", side: "front", x: 55, y: 86 },
+  { name: "Buk mitten", side: "front", x: 72, y: 109 },
   { name: "Buk höger", side: "front", x: 89, y: 86 },
   { name: "Lår vänster", side: "front", x: 56, y: 153 },
   { name: "Lår höger", side: "front", x: 88, y: 153 },
@@ -33,7 +34,7 @@ function knownSite(name: string) {
 }
 
 function BodyShape({ side }: { side: "front" | "back" }) {
-  return <svg viewBox="0 0 144 218" className="mx-auto h-56 w-36" aria-hidden="true">
+  return <svg viewBox="0 0 144 218" className="mx-auto block w-full" aria-hidden="true">
     <circle cx="72" cy="19" r="15" fill="none" stroke="currentColor" strokeWidth="2" />
     <path d="M 57 37 L 45 45 L 30 45 L 15 99 L 25 104 L 46 63 L 49 111 L 52 126 L 55 201 L 66 201 L 72 135 L 78 201 L 89 201 L 92 126 L 95 111 L 98 63 L 119 104 L 129 99 L 114 45 L 99 45 L 87 37 Z" fill="currentColor" fillOpacity=".08" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
     <path d={side === "front" ? "M 72 43 L 72 119 M 49 116 Q 72 126 95 116" : "M 45 48 Q 72 77 99 48 M 72 43 L 72 115"} fill="none" stroke="currentColor" strokeOpacity=".35" strokeWidth="1.5" />
@@ -55,18 +56,24 @@ export function BodyMap({ logs }: { logs: DoseLog[] }) {
   const focusEvents = events.filter(event => event[0].site?.toLocaleLowerCase("sv-SE") === focus?.toLocaleLowerCase("sv-SE")).sort((a, b) => b[0].takenAt.localeCompare(a[0].takenAt));
   const showHistory = (name: string) => setFocusedSite(value => value === name ? null : name);
   return <div>
-    <div className="grid grid-cols-2 gap-1 text-center">
-      {(["front", "back"] as const).map(side => <div key={side} className="relative mx-auto w-36 text-muted-foreground">
-        <BodyShape side={side} />
-        {known.filter(site => site.side === side).map(site => {
-          const count = events.filter(event => event[0].site?.toLocaleLowerCase("sv-SE") === site.name.toLocaleLowerCase("sv-SE")).length;
-          const active = focus === site.name;
-          return <button key={site.name} type="button" aria-label={`Visa historik för ${site.name}: ${count} ${count === 1 ? "injektionstillfälle" : "injektionstillfällen"}`} aria-pressed={active} onClick={() => showHistory(site.name)} title={site.name} style={{ left: `${site.x / 144 * 100}%`, top: `${site.y / 218 * 100}%` }} className={`absolute grid size-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 text-[11px] font-semibold shadow-sm transition-transform hover:scale-110 ${active ? "border-foreground bg-primary text-primary-foreground" : count ? "border-background bg-primary text-primary-foreground" : "border-primary bg-card text-primary"}`}>{count || <span className="size-2 rounded-full bg-primary" />}</button>;
-        })}
-        <p className="mt-1 text-xs font-medium text-muted-foreground">{side === "front" ? "Framsida" : "Baksida"}</p>
+    <div className="grid grid-cols-2 gap-2 text-center">
+      {(["front", "back"] as const).map(side => <div key={side} className="relative min-w-0 rounded-2xl border border-border/60 bg-muted/30 py-3 text-muted-foreground">
+        <div className="relative mx-auto w-36 max-w-full">
+          <BodyShape side={side} />
+          {known.filter(site => site.side === side).map(site => {
+            const count = events.filter(event => event[0].site?.toLocaleLowerCase("sv-SE") === site.name.toLocaleLowerCase("sv-SE")).length;
+            const active = focus === site.name;
+            return <button key={site.name} type="button" aria-label={`Visa historik för ${site.name}: ${count} ${count === 1 ? "injektionstillfälle" : "injektionstillfällen"}`} aria-pressed={active} onClick={() => showHistory(site.name)} title={site.name} style={{ left: `${site.x / 144 * 100}%`, top: `${site.y / 218 * 100}%` }} className={`absolute grid size-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 text-[11px] font-semibold shadow-sm transition-transform hover:scale-110 ${active ? "border-foreground bg-primary text-primary-foreground" : count ? "border-background bg-primary text-primary-foreground" : "border-primary bg-card text-primary"}`}>{count || <span className="size-2 rounded-full bg-primary" />}</button>;
+          })}
+        </div>
+        <p className="mt-1 text-xs font-medium text-foreground/80">{side === "front" ? "Framsida" : "Baksida"}</p>
       </div>)}
     </div>
-    {other.length > 0 && <div className="mt-4 flex flex-wrap gap-2"><span className="w-full text-xs text-muted-foreground">Övriga platser</span>{other.map(name => <button type="button" key={name} onClick={() => showHistory(name)} aria-pressed={focus === name} className={`min-h-9 rounded-full border px-3 text-xs ${focus === name ? "border-primary bg-accent text-accent-foreground" : "border-border"}`}>{name}</button>)}</div>}
+    <p className="mt-3 text-center text-xs text-muted-foreground">Tryck på en markering för att se historik.</p>
+    {other.length > 0 && <div className="mt-4 divide-y divide-border border-t border-border">{other.map(name => {
+      const count = events.filter(event => event[0].site?.toLocaleLowerCase("sv-SE") === name.toLocaleLowerCase("sv-SE")).length;
+      return <button type="button" key={name} onClick={() => showHistory(name)} aria-pressed={focus === name} className="flex min-h-11 w-full items-center justify-between gap-3 py-2 text-left text-sm"><span className={focus === name ? "font-medium text-primary" : "text-muted-foreground"}>{name}</span><span className="flex items-center gap-1 text-muted-foreground"><span className="tabular-nums">{count}</span><ChevronRight className="size-4"/></span></button>;
+    })}</div>}
     {focus && <div className="mt-5 border-t border-border pt-4"><p className="font-medium">{focus}</p><p className="mt-1 text-xs text-muted-foreground">{focusEvents.length} {focusEvents.length === 1 ? "loggat injektionstillfälle" : "loggade injektionstillfällen"}</p>{focusEvents.length > 0 && <div className="mt-3 space-y-2">{focusEvents.slice(0, 5).map(event => <div key={event[0].id} className="flex justify-between gap-3 text-xs"><span className="truncate">{event.map(log => log.peptideName).join(" + ")}</span><span className="shrink-0 text-muted-foreground">{displayLogDate(stockholmDate(event[0].takenAt), { day: "numeric", month: "short", year: "numeric" })}</span></div>)}</div>}</div>}
   </div>;
 }
