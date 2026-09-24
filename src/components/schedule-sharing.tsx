@@ -7,10 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { PageHeader, Surface } from "@/components/peptime-ui";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { resolvedSchedule } from "@/lib/schedule";
+import { scheduleItemFromPeptide, type SharedScheduleItem } from "@/lib/schedule-import";
 import { defaultInjectionSites, syringeUnits, type MixGroupSchedule, type Peptide, type PeptimeStore, type ScheduleFrequency, type Slot } from "@/lib/types";
 
-type Item = Omit<Peptide, "id" | "remainingMg" | "reconstitutedAt" | "lastSite" | "archived" | "example">;
+type Item = SharedScheduleItem;
 type Saved = { id: string; code: string; name: string; items: Item[]; groups: MixGroupSchedule[]; createdAt: string; updatedAt: string };
 type Preview = { name: string; items: Item[]; groups: MixGroupSchedule[] };
 
@@ -193,14 +193,7 @@ export function ScheduleSharing({ store, update, onBack }: { store: PeptimeStore
   const importCurrent = () => {
     if (!currentPeptides.length) return;
     if ((draft.name.trim() || draft.items.some(item => item.name.trim())) && !window.confirm("Ersätta det öppna utkastet med ditt nuvarande schema från Peptider? Sparade scheman ändras inte.")) return;
-    const items: Item[] = currentPeptides.map(peptide => ({
-      name: peptide.name, shortCode: peptide.shortCode, color: peptide.color,
-      doseMcg: peptide.doseMcg, vialMg: peptide.vialMg, waterMl: peptide.waterMl,
-      route: peptide.route, ...resolvedSchedule(peptide, store.mixGroups),
-      fasted: peptide.fasted, fastedNote: peptide.fastedNote,
-      mixGroupId: peptide.mixGroupId, beyondUseDays: peptide.beyondUseDays,
-      sites: [...peptide.sites], notes: peptide.notes,
-    }));
+    const items = currentPeptides.map(peptide => scheduleItemFromPeptide(peptide, store.mixGroups));
     const usedGroups = new Set(items.map(item => key(item.mixGroupId)).filter(Boolean));
     const groups = store.mixGroups.filter(group => usedGroups.has(key(group.name))).map(group => ({ ...group, weekdays: [...group.weekdays] }));
     setDraft({ ...emptySaved(), name: "Mitt schema", items, groups });
