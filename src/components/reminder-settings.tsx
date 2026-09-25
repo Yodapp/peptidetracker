@@ -36,6 +36,7 @@ export function ReminderSettings({ available }: { available: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [summaryTimeDraft, setSummaryTimeDraft] = useState(defaults.daily_summary_time);
 
   useEffect(() => {
     let active = true;
@@ -57,6 +58,7 @@ export function ReminderSettings({ available }: { available: boolean }) {
         const subscription = await currentSubscription();
         if (!active) return;
         setPreferences(data.preferences ?? defaults);
+        setSummaryTimeDraft(data.preferences?.daily_summary_time ?? defaults.daily_summary_time);
         setConfigured(Boolean(data.configured));
         setDeliveryReady(Boolean(data.deliveryReady));
         setPublicKey(data.publicKey ?? "");
@@ -78,19 +80,24 @@ export function ReminderSettings({ available }: { available: boolean }) {
         if (ios && !installed) throw new Error("Öppna Peptime från hemskärmen för att aktivera påminnelser.");
         if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("Den här webbläsaren stöder inte pushnotiser.");
         if (Notification.permission === "denied") throw new Error("Notiser är blockerade. Tillåt Peptime i telefonens notisinställningar.");
-        // iOS requires this call to happen directly inside the user's tap handler.
-        const granted = await Notification.requestPermission();
-        setPermission(granted);
-        if (granted !== "granted") throw new Error("Tillåt notiser för att aktivera påminnelser.");
-        const registration = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
-        subscription = await registration.pushManager.getSubscription();
-        const key = publicKeyBytes(publicKey);
-        const existingKey = subscription?.options.applicationServerKey;
-        if (subscription && existingKey && (existingKey.byteLength !== key.length || new Uint8Array(existingKey).some((byte, index) => byte !== key[index]))) {
-          await subscription.unsubscribe();
-          subscription = null;
+        if (!preferences.enabled || !registered) {
+          // iOS requires this call to happen directly inside the user's tap handler.
+          const granted = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+          setPermission(granted);
+          if (granted !== "granted") throw new Error("Tillåt notiser för att aktivera påminnelser.");
+          const registration = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+          subscription = await registration.pushManager.getSubscription();
+          const key = publicKeyBytes(publicKey);
+          const existingKey = subscription?.options.applicationServerKey;
+          if (subscription && existingKey && (existingKey.byteLength !== key.length || new Uint8Array(existingKey).some((byte, index) => byte !== key[index]))) {
+            await subscription.unsubscribe();
+            subscription = null;
+          }
+          subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        } else {
+          subscription = await currentSubscription();
+          if (!subscription) throw new Error("Telefonens notisprenumeration saknas. Aktivera påminnelser igen.");
         }
-        subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
       } else subscription = await currentSubscription();
       const response = await fetch("/api/reminders", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -99,9 +106,10 @@ export function ReminderSettings({ available }: { available: boolean }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Kunde inte spara påminnelser.");
       setPreferences(next);
+      setSummaryTimeDraft(next.daily_summary_time);
       setEndpoint(subscription?.endpoint ?? "");
-      setRegistered(Boolean(next.enabled && subscription));
-      setMessage(next.enabled ? "Påminnelser är aktiva på den här telefonen." : "Påminnelser är avstängda.");
+      if (!next.enabled || !registered) setRegistered(Boolean(next.enabled && subscription));
+      setMessage(next.enabled ? "Påminnelseinställningarna är sparade." : "Påminnelser är avstängda.");
     } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
@@ -129,7 +137,7 @@ export function ReminderSettings({ available }: { available: boolean }) {
       <label className="block text-sm font-medium">Första påminnelsen<select className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-foreground" value={preferences.lead_minutes} disabled={busy || !active} onChange={event => void save({ ...preferences, lead_minutes: Number(event.target.value) as 0 | 10 | 15 })}><option value={0}>Vid schemalagd tid</option><option value={10}>10 minuter före</option><option value={15}>15 minuter före</option></select></label>
       <div className="flex min-h-12 items-center justify-between gap-3"><div><p className="text-sm font-medium">Påminn igen om dosen inte är loggad</p><p className="text-xs leading-5 text-muted-foreground">10 minuter efter schemalagd tid.</p></div><Switch aria-label="Påminn igen" checked={preferences.follow_up_enabled} disabled={busy || !active} onCheckedChange={checked => void save({ ...preferences, follow_up_enabled: checked })}/></div>
       <div className="flex min-h-12 items-center justify-between gap-3 border-t border-border pt-4"><div><p className="text-sm font-medium">Dagens sammanfattning</p><p className="text-xs leading-5 text-muted-foreground">En påminnelse om du inte fyllt i den.</p></div><Switch aria-label="Påminn om dagens sammanfattning" checked={preferences.daily_summary_enabled} disabled={busy || !active} onCheckedChange={checked => void save({ ...preferences, daily_summary_enabled: checked })}/></div>
-      {preferences.daily_summary_enabled && <label className="block text-sm font-medium">Tid för sammanfattning<input type="time" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-foreground" value={preferences.daily_summary_time} disabled={busy || !active} onChange={event => { if (event.target.value) void save({ ...preferences, daily_summary_time: event.target.value }); }}/></label>}
+      {preferences.daily_summary_enabled && <label className="block text-sm font-medium">Tid för sammanfattning<input type="time" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-foreground" value={summaryTimeDraft} disabled={busy || !active} onChange={event => setSummaryTimeDraft(event.target.value)} onBlur={() => { if (summaryTimeDraft && summaryTimeDraft !== preferences.daily_summary_time) void save({ ...preferences, daily_summary_time: summaryTimeDraft }); }} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></label>}
       {active && <Button type="button" variant="outline" className="w-full" disabled={busy} onClick={test}>Skicka testnotis</Button>}
       <p className="text-xs leading-5 text-muted-foreground">Om en logg ännu inte har synkats kan du få en extra påminnelse. Telefonen behöver internet för pushnotiser.</p>
     </div>}
