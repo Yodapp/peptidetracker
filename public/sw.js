@@ -90,5 +90,12 @@ self.addEventListener("push", event => {
 });
 self.addEventListener("notificationclick", event => {
   event.notification.close();
-  event.waitUntil(self.clients.openWindow(event.notification.data?.url || "/"));
+  event.waitUntil((async () => {
+    const url = new URL(event.notification.data?.url || "/", self.location.origin);
+    if (url.origin !== self.location.origin) return;
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const existing = windows.find(client => new URL(client.url).origin === url.origin);
+    if (existing) { await existing.navigate(url.href); return existing.focus(); }
+    return self.clients.openWindow(url.href);
+  })());
 });

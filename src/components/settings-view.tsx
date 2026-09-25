@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, Download, RotateCcw, ShieldCheck } from "lucide-react";
+import { Download, RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { PageHeader, SectionHeading, Surface } from "@/components/peptime-ui";
 import { logScheduledDate } from "@/lib/log-day";
 import { syringeCapacity, type PeptimeStore } from "@/lib/types";
 import { readLocalRecovery, type LocalRecovery } from "@/lib/local-recovery";
 import type { RecoveryCounts } from "@/lib/recovery-store";
+import { ReminderSettings } from "@/components/reminder-settings";
 
 const disclaimer = "Log what you want. Peptime contains no medical advice.";
 
@@ -47,6 +47,13 @@ export function SettingsView({ store, update, syncState, retrySync, syncError, u
     event.preventDefault();
     const form = event.currentTarget;
     try {
+      if ("serviceWorker" in navigator) {
+        const subscription = await navigator.serviceWorker.getRegistration("/").then(registration => registration?.pushManager.getSubscription());
+        if (subscription) {
+          await fetch("/api/reminders", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => undefined);
+          await subscription.unsubscribe().catch(() => undefined);
+        }
+      }
       if (!preserveLocal) Object.keys(localStorage).filter(key => key.startsWith("peptime-demo-v1")).forEach(key => localStorage.removeItem(key));
       sessionStorage.removeItem("peptime-checkin-later");
       if ("caches" in window) {
@@ -62,7 +69,7 @@ export function SettingsView({ store, update, syncState, retrySync, syncError, u
     <div className="space-y-7">
       <section><SectionHeading title="Dosering"/><Surface className="divide-y divide-border"><Row label="Spruta" detail={`Max ${syringeCapacity(store.settings.syringe)} IU`}><select className="bg-transparent text-[15px] text-primary" value={store.settings.syringe} onChange={e=>update(s=>({...s,settings:{...s.settings,syringe:e.target.value as PeptimeStore["settings"]["syringe"]}}))}><option>U-100 0.3 ml</option><option>U-100 0.5 ml</option><option>U-100 1 ml</option></select></Row><Row label="Visad viktenhet"><select className="bg-transparent text-[15px] text-primary" value={store.settings.massDisplayUnit} onChange={e=>update(s=>({...s,settings:{...s.settings,massDisplayUnit:e.target.value as "mcg"|"mg"}}))}><option value="mcg">mcg</option><option value="mg">mg</option></select></Row></Surface><p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">På U-100 motsvarar 1 IU-markering alltid 0,01 ml.</p></section>
       <section><SectionHeading title="Utseende"/><Surface className="divide-y divide-border"><Row label="Utseende"><select aria-label="Utseende" className="bg-transparent text-[15px] text-primary" value={store.settings.themeMode} onChange={e=>setThemeMode(e.target.value as PeptimeStore["settings"]["themeMode"])}><option value="system">Följ systemet</option><option value="light">Ljust</option><option value="dark">Mörkt</option></select></Row><Row label="Tidszon"><span className="text-[15px] text-muted-foreground">Stockholm</span></Row></Surface></section>
-      <section><SectionHeading title="Påminnelser"/><Surface><Row label="Notiser" detail="Kommer snart"><Switch aria-label="Påminnelser kommer snart" checked={false} disabled/></Row><div className="flex gap-2 border-t border-border px-4 py-3 text-xs leading-5 text-muted-foreground"><Bell className="mt-0.5 size-4 shrink-0"/>Påminnelser aktiveras när säker leverans och prenumeration är färdigbyggda.</div></Surface></section>
+      <section><SectionHeading title="Påminnelser"/><ReminderSettings available={Boolean(userId) && !preserveLocal && syncState === "synced"}/></section>
       <section><SectionHeading title="Data"/><Surface className="grid grid-cols-2 gap-2 p-3"><Button variant="outline" onClick={()=>download("csv")}><Download/>CSV</Button><Button variant="outline" onClick={()=>download("json")}><Download/>JSON</Button></Surface><p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">En lokal kopia sparas okrypterad i webbläsaren. {preserveLocal ? "Under återställning sparas den även efter utloggning." : "Den rensas när du loggar ut."}</p></section>
       {recovery && <section><SectionHeading title="Lokal återställningskopia"/><Surface className="space-y-3 p-4"><p className="text-sm leading-6">En kopia från den tidigare offline-versionen finns kvar på den här enheten: {recovery.store.logs.length} loggar och {recovery.store.peptides.length} peptider. Den ändras inte när du laddar ned den.</p><Button type="button" variant="outline" className="w-full" onClick={downloadRecovery}><Download/>Ladda ned lokal kopia</Button></Surface></section>}
       {preserveLocal && missingCount > 0 && <section><SectionHeading title="Återställ kontosynk"/><Surface className="space-y-3 p-4"><p className="text-sm leading-6">Vid senaste kontrollen saknades {recoveryCounts?.logs ?? 0} loggar, {recoveryCounts?.dailyNotes ?? 0} daganteckningar, {recoveryCounts?.peptides ?? 0} peptider, {recoveryCounts?.mixGroups ?? 0} grupper och {recoveryCounts?.purchasePlans ?? 0} inköpsplaner i kontot.</p><p className="text-xs leading-5 text-muted-foreground">Återställningen läser kontot på nytt och lägger bara till poster vars ID fortfarande saknas. Befintliga kontoposter behålls. Ladda ned en fullständig JSON-kopia först.</p><Button type="button" className="w-full" disabled={restoring} onClick={restore}>{restoring ? "Återställer…" : "Lägg till saknade poster i kontot"}</Button></Surface></section>}

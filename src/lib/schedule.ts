@@ -30,7 +30,7 @@ function mondayIndex(value: string) {
   return (new Date(`${value}T12:00:00Z`).getUTCDay() + 6) % 7;
 }
 
-export function isCycleOn(schedule: Schedule, date: string) {
+export function isCycleOn(schedule: Pick<Schedule, "cycleStart" | "weeksOn" | "weeksOff">, date: string) {
   if (!schedule.cycleStart || !schedule.weeksOn) return true;
   const elapsed = utcDayNumber(date) - utcDayNumber(schedule.cycleStart);
   if (elapsed < 0) return false;

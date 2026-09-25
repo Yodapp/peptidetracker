@@ -19,6 +19,7 @@ Peptime is a private, mobile-first peptide research logger. The interface is Swe
 - Case-insensitive mix groups with suggestions from existing groups
 - Named purchase plans with 30/60-day vial and BAC totals, automatic mcg/mg conversion, U-100 math, and PNG sharing
 - Schedule-aware low-inventory warning when an active peptide has about 15 days or less remaining
+- Optional Web Push reminders for scheduled doses, a follow-up after 10 minutes without a synced log, and an evening daily-summary prompt
 
 No doses or protocols in the example data are recommendations. They are UI demonstration rows only and are labeled as examples in the app.
 
@@ -69,6 +70,9 @@ Run these migrations once, in order, in Supabase SQL Editor before deploying thi
 9. [`supabase/migrations/202609200001_daily_checkin.sql`](supabase/migrations/202609200001_daily_checkin.sql)
 10. [`supabase/migrations/20260921203002_pain_level.sql`](supabase/migrations/20260921203002_pain_level.sql)
 11. [`supabase/migrations/20260922170000_shared_schedules.sql`](supabase/migrations/20260922170000_shared_schedules.sql)
+12. [`supabase/migrations/20260925090000_atomic_shared_schedule_import.sql`](supabase/migrations/20260925090000_atomic_shared_schedule_import.sql)
+13. [`supabase/migrations/20260925100000_reminders.sql`](supabase/migrations/20260925100000_reminders.sql)
+14. [`supabase/migrations/20260925100001_reminder_cron.sql`](supabase/migrations/20260925100001_reminder_cron.sql)
 
 The second migration adds group-owned schedules, pause/cycle fields, the reminder preference, and RLS for `mix_groups`. The third separates the scheduled day from the actual timestamp and backfills existing logs using each profile's previous log-day boundary. The fourth syncs the user's mcg/mg display preference. Migration 8 separates vial size from remaining inventory and adds RLS-protected saved purchase plans. Migrations 9 and 10 add the daily check-in scales, including pain. Migration 11 adds reusable shared peptide schedules and code-based imports.
 
@@ -85,9 +89,16 @@ Vercel will run `npm run build` using the stable webpack compiler. No service-ro
 
 ## Web Push reminders
 
-The service worker contains notification handlers, but the in-app reminder control intentionally stays disabled until the subscription and delivery pipeline below exists. iOS Web Push requires Peptime to be installed on the Home Screen and permission to be requested from the installed app.
+Peptime uses its existing service worker, standard VAPID Web Push, a protected server route, and a Supabase Cron job. iOS Web Push requires Peptime to be opened from a Home Screen icon and notification permission to be requested there. Android can subscribe in the browser or installed PWA. The setting stays unavailable until the dispatch job has run recently; a registered device can send itself a test notification.
 
-Production delivery still needs a server-side Web Push scheduler. Configure VAPID keys in Vercel (`NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`), store each authenticated user's Push API subscription in a protected Supabase table, and schedule one message per due time slot. The payload should combine all items in the slot, for example `Morgon 08:00 — Adamax 2 IU, Selank 5 IU`; do not enqueue one message per peptide. Browser push delivery is best-effort and should not be presented as native-app reliability.
+For production, apply migrations 13 and 14, then configure the following **server-only** environment variables in Vercel: `SUPABASE_SERVICE_ROLE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, and `REMINDER_CRON_SECRET`. Generate a VAPID pair with `npx web-push generate-vapid-keys` and a separate random dispatch secret. Never expose the private key, service-role key, or dispatch secret with a `NEXT_PUBLIC_` prefix. The VAPID subject is a contact address such as `mailto:you@example.com`.
+
+Create two secrets in Supabase Vault with these exact names:
+
+- `peptime_reminder_dispatch_url`: the production `https://.../api/reminders/dispatch` URL
+- `peptime_reminder_dispatch_secret`: the **same value** as Vercel's `REMINDER_CRON_SECRET`
+
+The Cron migration schedules a call every minute and reads the URL and secret from Vault at run time. After deployment, verify that Settings changes from “Leveransen är inte redo ännu” to an available toggle, enable reminders on a real phone, and use “Skicka testnotis”. Then verify a scheduled reminder and follow-up with the PWA closed on both iOS and Android. Sent events are claimed per subscription and schedule slot, so a retry does not ordinarily repeat them. An offline dose log can still cause one extra follow-up before it syncs. Push requires connectivity and OS delivery is best effort.
 
 ## Data and privacy notes
 
