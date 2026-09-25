@@ -26,8 +26,9 @@ export function validPushEndpoint(value: string) {
   } catch { return false; }
 }
 
-export async function sendPush(subscription: StoredSubscription, payload: { title: string; body: string; tag: string; url: string }) {
+export async function sendPush(subscription: StoredSubscription, payload: { title: string; body: string; tag: string; url: string }, urgency: "normal" | "high" = "high") {
   if (!pushConfigured()) throw new Error("Web Push is not configured");
   webpush.setVapidDetails(process.env.VAPID_SUBJECT!, process.env.VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!);
-  return webpush.sendNotification({ endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } }, JSON.stringify(payload), { TTL: 60 * 60, urgency: "normal", timeout: 10_000 });
+  // "high" lets time-sensitive reminders through Android's battery saving promptly.
+  return webpush.sendNotification({ endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } }, JSON.stringify(payload), { TTL: 60 * 60, urgency, timeout: 10_000 });
 }

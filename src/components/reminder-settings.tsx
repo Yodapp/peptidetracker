@@ -5,6 +5,7 @@ import { Bell, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Surface } from "@/components/peptime-ui";
+import { registerServiceWorker } from "@/lib/service-worker";
 
 type Preferences = { enabled: boolean; lead_minutes: 0 | 10 | 15; follow_up_enabled: boolean; daily_summary_enabled: boolean; daily_summary_time: string };
 type InstallPrompt = Event & { prompt: () => Promise<void> };
@@ -85,7 +86,7 @@ export function ReminderSettings({ available }: { available: boolean }) {
           const granted = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
           setPermission(granted);
           if (granted !== "granted") throw new Error("Tillåt notiser för att aktivera påminnelser.");
-          const registration = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+          const registration = await registerServiceWorker();
           subscription = await registration.pushManager.getSubscription();
           const key = publicKeyBytes(publicKey);
           const existingKey = subscription?.options.applicationServerKey;
@@ -134,10 +135,10 @@ export function ReminderSettings({ available }: { available: boolean }) {
     {ios && !installed && <div className="border-t border-border bg-muted/40 p-4 text-sm leading-6"><p className="font-medium">Lägg till Peptime på hemskärmen</p><p className="mt-1 text-muted-foreground">Tryck på Dela i webbläsaren, välj ”Lägg till på hemskärmen” och öppna sedan Peptime från den nya ikonen. Då kan du slå på notiser.</p></div>}
     {!ios && !installed && installPrompt && <div className="border-t border-border p-4"><Button type="button" variant="outline" className="w-full" onClick={() => { void installPrompt.prompt(); setInstallPrompt(null); }}>Lägg till Peptime på hemskärmen</Button></div>}
     {configured && deliveryReady && available && <div className="space-y-4 border-t border-border p-4">
-      <label className="block text-sm font-medium">Första påminnelsen<select className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-foreground" value={preferences.lead_minutes} disabled={busy || !active} onChange={event => void save({ ...preferences, lead_minutes: Number(event.target.value) as 0 | 10 | 15 })}><option value={0}>Vid schemalagd tid</option><option value={10}>10 minuter före</option><option value={15}>15 minuter före</option></select></label>
+      <label className="block text-sm font-medium">Första påminnelsen<select className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-base text-foreground" value={preferences.lead_minutes} disabled={busy || !active} onChange={event => void save({ ...preferences, lead_minutes: Number(event.target.value) as 0 | 10 | 15 })}><option value={0}>Vid schemalagd tid</option><option value={10}>10 minuter före</option><option value={15}>15 minuter före</option></select></label>
       <div className="flex min-h-12 items-center justify-between gap-3"><div><p className="text-sm font-medium">Påminn igen om dosen inte är loggad</p><p className="text-xs leading-5 text-muted-foreground">10 minuter efter schemalagd tid.</p></div><Switch aria-label="Påminn igen" checked={preferences.follow_up_enabled} disabled={busy || !active} onCheckedChange={checked => void save({ ...preferences, follow_up_enabled: checked })}/></div>
       <div className="flex min-h-12 items-center justify-between gap-3 border-t border-border pt-4"><div><p className="text-sm font-medium">Dagens sammanfattning</p><p className="text-xs leading-5 text-muted-foreground">En påminnelse om du inte fyllt i den.</p></div><Switch aria-label="Påminn om dagens sammanfattning" checked={preferences.daily_summary_enabled} disabled={busy || !active} onCheckedChange={checked => void save({ ...preferences, daily_summary_enabled: checked })}/></div>
-      {preferences.daily_summary_enabled && <label className="block text-sm font-medium">Tid för sammanfattning<input type="time" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-foreground" value={summaryTimeDraft} disabled={busy || !active} onChange={event => setSummaryTimeDraft(event.target.value)} onBlur={() => { if (summaryTimeDraft && summaryTimeDraft !== preferences.daily_summary_time) void save({ ...preferences, daily_summary_time: summaryTimeDraft }); }} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></label>}
+      {preferences.daily_summary_enabled && <label className="block text-sm font-medium">Tid för sammanfattning<input type="time" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-base text-foreground" value={summaryTimeDraft} disabled={busy || !active} onChange={event => setSummaryTimeDraft(event.target.value)} onBlur={() => { if (summaryTimeDraft && summaryTimeDraft !== preferences.daily_summary_time) void save({ ...preferences, daily_summary_time: summaryTimeDraft }); }} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}/></label>}
       {active && <Button type="button" variant="outline" className="w-full" disabled={busy} onClick={test}>Skicka testnotis</Button>}
       <p className="text-xs leading-5 text-muted-foreground">Om en logg ännu inte har synkats kan du få en extra påminnelse. Telefonen behöver internet för pushnotiser.</p>
     </div>}

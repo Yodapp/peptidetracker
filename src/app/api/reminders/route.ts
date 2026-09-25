@@ -8,6 +8,13 @@ const defaults = { enabled: false, lead_minutes: 0, follow_up_enabled: true, dai
 
 function validTime(value: unknown): value is string { return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value); }
 
+type ValidSubscription = { endpoint: string; keys: { p256dh: string; auth: string } };
+function validSubscription(subscription: unknown): subscription is ValidSubscription {
+  if (!subscription || typeof subscription !== "object") return false;
+  const value = subscription as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+  return typeof value.endpoint === "string" && value.endpoint.length <= 2048 && validPushEndpoint(value.endpoint) && typeof value.keys?.p256dh === "string" && typeof value.keys?.auth === "string" && value.keys.p256dh.length <= 256 && value.keys.auth.length <= 256;
+}
+
 async function account() {
   const client = await createSupabaseServerClient();
   const { data: { user }, error } = await client.auth.getUser();
@@ -49,15 +56,28 @@ export async function POST(request: Request) {
   const subscription = body.subscription;
   if (enabled) {
     if (!subscription || typeof subscription !== "object") return Response.json({ error: "Telefonens prenumeration saknas." }, { status: 400 });
-    const value = subscription as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
-    if (typeof value.endpoint !== "string" || value.endpoint.length > 2048 || !validPushEndpoint(value.endpoint) || typeof value.keys?.p256dh !== "string" || typeof value.keys?.auth !== "string" || value.keys.p256dh.length > 256 || value.keys.auth.length > 256) {
-      return Response.json({ error: "Telefonens push-prenumeration är ogiltig." }, { status: 400 });
-    }
-    const result = await client.from("push_subscriptions").upsert({ user_id: user.id, endpoint: value.endpoint, p256dh: value.keys.p256dh, auth: value.keys.auth, last_seen_at: new Date().toISOString() }, { onConflict: "endpoint" });
+    if (!validSubscription(subscription)) return Response.json({ error: "Telefonens push-prenumeration är ogiltig." }, { status: 400 });
+    const result = await client.from("push_subscriptions").upsert({ user_id: user.id, endpoint: subscription.endpoint, p256dh: subscription.keys.p256dh, auth: subscription.keys.auth, last_seen_at: new Date().toISOString() }, { onConflict: "endpoint" });
     if (result.error) return Response.json({ error: "Kunde inte registrera den här telefonen." }, { status: 500 });
   }
   const result = await client.from("reminder_preferences").upsert({ user_id: user.id, enabled, lead_minutes: lead, follow_up_enabled: followUp, daily_summary_enabled: summary, daily_summary_time: summaryTime, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
   if (result.error) return Response.json({ error: "Kunde inte spara påminnelseinställningarna." }, { status: 500 });
+  return Response.json({ ok: true });
+}
+
+/** Re-register this phone's current subscription (on launch, or after the browser rotated it). */
+export async function PUT(request: Request) {
+  const { client, user } = await account();
+  if (!user) return Response.json({ error: "Logga in först." }, { status: 401 });
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch { return Response.json({ error: "Ogiltig begäran." }, { status: 400 }); }
+  if (!validSubscription(body.subscription)) return Response.json({ error: "Telefonens push-prenumeration är ogiltig." }, { status: 400 });
+  const { endpoint, keys } = body.subscription;
+  const result = await client.from("push_subscriptions").upsert({ user_id: user.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, last_seen_at: new Date().toISOString() }, { onConflict: "endpoint" });
+  if (result.error) return Response.json({ error: "Kunde inte registrera den här telefonen." }, { status: 500 });
+  if (typeof body.oldEndpoint === "string" && body.oldEndpoint !== endpoint) {
+    await client.from("push_subscriptions").delete().eq("user_id", user.id).eq("endpoint", body.oldEndpoint);
+  }
   return Response.json({ ok: true });
 }
 

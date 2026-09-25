@@ -19,4 +19,6 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"] };
+// Skip static files, the service worker, the manifest and public endpoints:
+// none of them need the session refreshed, and each check is a network call.
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon\\.ico|sw\\.js|manifest\\.webmanifest|api/version|api/reminders/dispatch|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"] };
