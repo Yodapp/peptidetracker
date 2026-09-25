@@ -203,6 +203,13 @@ function useStore() {
         if (!data.user) throw userError ?? new Error("No authenticated Supabase user");
         if (cancelled) return;
         const userId = data.user.id;
+        if (showingLocal && userIdRef.current && userIdRef.current !== userId) {
+          // A cached copy belongs to another account. Hide it before loading
+          // this account's own data, including while its network request runs.
+          setReady(false);
+          setStore(normalizeStoreIds(initialStore));
+          showingLocal = false;
+        }
         clientRef.current = client;
         userIdRef.current = userId;
         setActiveUserId(userId);
