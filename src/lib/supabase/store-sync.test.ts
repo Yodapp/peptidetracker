@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { initialStore } from "../demo-data";
 import { visibleRecoveryStore } from "../recovery-store";
 import type { DoseLog } from "../types";
-import { changedRecords, normalizeStoreIds, saveRemoteStore } from "./store";
+import { changedRecords, normalizeStoreIds, rebaseStore, saveRemoteStore } from "./store";
 
 function recordingClient() {
   const calls: { table: string; operation: string; rows?: unknown }[] = [];
@@ -88,4 +88,50 @@ test("changing preparation closes only the old vial and keeps existing logs unto
   assert.ok(calls.some(call => call.table === "vials" && call.operation === "update"));
   assert.ok(calls.some(call => call.table === "vials" && call.operation === "upsert" && (call.rows as { id: string }[])[0].id === nextVialId));
   assert.equal(calls.filter(call => call.table === "dose_logs").length, 0);
+});
+
+function doseLog(id: string, peptide: { id: string; name: string }, note = ""): DoseLog {
+  return { id, peptideId: peptide.id, peptideName: peptide.name, plannedDose: 100, actualDose: 100, unit: "mcg", computedIu: 4, slot: "morning", takenAt: "2026-09-23T07:00:00.000Z", scheduledDate: "2026-09-23", status: "taken", note };
+}
+
+test("a log deleted on another device stays deleted here", () => {
+  const initial = base();
+  const peptide = initial.peptides[0];
+  const kept = doseLog("22222222-2222-4222-8222-222222222222", peptide);
+  const deletedElsewhere = doseLog("33333333-3333-4333-8333-333333333333", peptide);
+  const synced = { ...initial, logs: [kept, deletedElsewhere] };
+  const remote = { ...initial, logs: [kept] };
+  const result = rebaseStore(remote, synced, synced);
+  assert.deepEqual(result.logs.map(log => log.id), [kept.id]);
+});
+
+test("unsent edits from this device are replayed over newer account state", () => {
+  const initial = base();
+  const peptide = initial.peptides[0];
+  const shared = doseLog("22222222-2222-4222-8222-222222222222", peptide);
+  const fromOtherDevice = doseLog("33333333-3333-4333-8333-333333333333", peptide, "Other phone");
+  const unsent = doseLog("44444444-4444-4444-8444-444444444444", peptide, "Offline");
+  const removedHere = doseLog("55555555-5555-4555-8555-555555555555", peptide);
+  const synced = { ...initial, logs: [shared, removedHere] };
+  const local = { ...synced, logs: [{ ...shared, note: "Edited here" }, unsent], todayAdditions: ["2026-09-23:x"], settings: { ...synced.settings, themeMode: "dark" as const } };
+  const remote = { ...initial, logs: [shared, removedHere, fromOtherDevice] };
+  const result = rebaseStore(remote, synced, local);
+  assert.deepEqual(result.logs.map(log => [log.id, log.note]), [[shared.id, "Edited here"], [fromOtherDevice.id, "Other phone"], [unsent.id, "Offline"]]);
+  assert.deepEqual(result.todayAdditions, ["2026-09-23:x"]);
+  assert.equal(result.settings.themeMode, "dark");
+});
+
+test("remote settings win unless this device changed them", () => {
+  const initial = base();
+  const remote = { ...initial, settings: { ...initial.settings, syringe: "U-100 0.3 ml" as const } };
+  assert.equal(rebaseStore(remote, initial, initial).settings.syringe, "U-100 0.3 ml");
+  const local = { ...initial, settings: { ...initial.settings, syringe: "U-100 0.5 ml" as const } };
+  assert.equal(rebaseStore(remote, initial, local).settings.syringe, "U-100 0.5 ml");
+});
+
+test("replaying an unchanged device copy writes nothing", async () => {
+  const synced = base();
+  const { client, calls } = recordingClient();
+  await saveRemoteStore(client, userId, synced, synced);
+  assert.deepEqual(calls, []);
 });

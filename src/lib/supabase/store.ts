@@ -28,6 +28,42 @@ export function changedRecords<T>(previous: T[], current: T[], key: (item: T) =>
   return current.filter(item => old.get(key(item)) !== stableJson(item));
 }
 
+function rebaseCollection<T>(remote: T[], base: T[], current: T[], key: (item: T) => string, applyRemovals: boolean): T[] {
+  const baseJson = new Map(base.map(item => [key(item), stableJson(item)]));
+  const currentKeys = new Set(current.map(key));
+  const removed = new Set(applyRemovals ? base.map(key).filter(id => !currentKeys.has(id)) : []);
+  const changed = new Map(current.filter(item => baseJson.get(key(item)) !== stableJson(item)).map(item => [key(item), item]));
+  const result = remote.filter(item => !removed.has(key(item))).map(item => changed.get(key(item)) ?? item);
+  const present = new Set(result.map(key));
+  changed.forEach((item, id) => { if (!present.has(id)) result.push(item); });
+  return result;
+}
+
+/**
+ * Apply this device's edits (current compared with the last synced copy) on
+ * top of the latest account state. Records absent from the account but
+ * unchanged here were deleted elsewhere and stay deleted. Removals are only
+ * replayed where saveRemoteStore deletes rows too (logs and purchase plans).
+ */
+export function rebaseStore(remoteInput: PeptimeStore, baseInput: PeptimeStore, currentInput: PeptimeStore): PeptimeStore {
+  const remote = normalizeStoreIds(remoteInput);
+  const base = normalizeStoreIds(baseInput);
+  const current = normalizeStoreIds(currentInput);
+  const settingsChanged = stableJson({ ...current.settings, themeMode: undefined }) !== stableJson({ ...base.settings, themeMode: undefined });
+  return {
+    ...remote,
+    peptides: rebaseCollection(remote.peptides, base.peptides, current.peptides, item => item.id, false),
+    mixGroups: rebaseCollection(remote.mixGroups, base.mixGroups, current.mixGroups, item => groupKey(item.name), false),
+    logs: rebaseCollection(remote.logs, base.logs, current.logs, item => item.id, true),
+    dailyNotes: rebaseCollection(remote.dailyNotes, base.dailyNotes, current.dailyNotes, item => item.date, false),
+    purchasePlans: rebaseCollection(remote.purchasePlans, base.purchasePlans, current.purchasePlans, item => item.id, true),
+    // Today's selections and the theme choice only live on this device.
+    todayAdditions: current.todayAdditions,
+    settings: { ...(settingsChanged ? current.settings : remote.settings), themeMode: current.settings.themeMode },
+    onboardingComplete: current.onboardingComplete !== base.onboardingComplete ? current.onboardingComplete : remote.onboardingComplete,
+  };
+}
+
 function purchaseItems(value: unknown): PurchasePlanItem[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap(raw => {

@@ -46,5 +46,9 @@
   html.dark { color-scheme: dark; }
   body { @apply bg-background text-foreground; font-feature-settings: "tnum" 1, "ss01" 1; letter-spacing: -.006em; }
   button, input, textarea, select { @apply touch-manipulation; }
+  @media (display-mode: standalone) {
+    /* Installed app: no rubber-band bounce past the page edges. */
+    html, body { overscroll-behavior: none; }
+  }
   ::selection { background: color-mix(in srgb, var(--primary) 35%, transparent); }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Archive, BarChart3, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight,
   FlaskConical, History, House, MoreHorizontal, Pencil, Plus, RotateCcw,
@@ -21,13 +21,15 @@ import { defaultInjectionSites, syringeCapacity, syringeUnits, type DailyNote, t
 import { addDays, displayLogDate, logScheduledDate, previousDate, stockholmDate, stockholmDateTimeInput, stockholmHour, stockholmLocalToIso } from "@/lib/log-day";
 import { groupKey, isDueOn, peptideSchedule, resolvedSchedule, scheduleTargetKey } from "@/lib/schedule";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { loadRemoteStore, normalizeStoreIds, saveRemoteStore } from "@/lib/supabase/store";
+import { loadRemoteStore, normalizeStoreIds, rebaseStore, saveRemoteStore } from "@/lib/supabase/store";
 import { readLocalRecovery } from "@/lib/local-recovery";
 import { missingRecoveryCounts, storeFromSyncEntities, visibleRecoveryStore, type RecoveryCounts } from "@/lib/recovery-store";
 import { clampInventoryMg, deleteDoseLog, replaceDoseLog } from "@/lib/inventory";
+import { applyThemeMode } from "@/lib/theme";
 
 const STORAGE_KEY = "peptime-demo-v1";
 const CHECKIN_LATER_KEY = "peptime-checkin-later";
+const LAST_USER_KEY = `${STORAGE_KEY}:last-user`;
 const slotNames: Record<Slot, string> = { morning: "Morgon", lunch: "Lunch", evening: "Kväll", as_needed: "Vid behov" };
 const disclaimer = "Log what you want. Peptime contains no medical advice.";
 
@@ -123,6 +125,24 @@ function SyringeDrawBar({ items }: { items: Peptide[] }) {
   </div>;
 }
 
+function readStorage(key: string) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function writeStorage(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch (error) { console.warn("Peptime could not write local storage", error); }
+}
+function readStoredStore(key: string) {
+  const saved = readStorage(key);
+  if (!saved) return null;
+  try { return normalizeStoreIds(JSON.parse(saved)); } catch { return null; }
+}
+function persistSynced(userId: string, store: PeptimeStore) { writeStorage(`${STORAGE_KEY}:${userId}:synced`, JSON.stringify(store)); }
+function isOffline() { return typeof navigator !== "undefined" && navigator.onLine === false; }
+const offlineMessage = "Offline · ändringarna sparas på den här enheten och synkas när du är ansluten igen.";
+function withTimeout<T>(promise: Promise<T>, ms: number) {
+  return Promise.race([promise, new Promise<null>(resolve => window.setTimeout(() => resolve(null), ms))]);
+}
+
 function useStore() {
   const [store, setStore] = useState<PeptimeStore>(() => normalizeStoreIds(initialStore));
   const [ready, setReady] = useState(false);
@@ -142,71 +162,129 @@ function useStore() {
   const syncEpoch = useRef(0);
   const hydrateFailures = useRef(0);
   const saveFailures = useRef(0);
+  const readyRef = useRef(false);
+  const lastHydratedAt = useRef(0);
+  const pendingSave = useRef<(() => void) | null>(null);
+  useEffect(() => { readyRef.current = ready; }, [ready]);
   useEffect(() => {
     let cancelled = false;
     let retryTimer: number | undefined;
     async function hydrate() {
       const hasRemote = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
       if (!hasRemote) {
-        try { const saved = localStorage.getItem(STORAGE_KEY); if (saved && !cancelled) setStore(normalizeStoreIds(JSON.parse(saved))); } catch {}
+        const saved = readStoredStore(STORAGE_KEY);
+        if (saved && !cancelled) setStore(saved);
         if (!cancelled) setReady(true);
         return;
       }
-      let cached: PeptimeStore | null = null;
+      // When the app is already showing data this is a refresh after resume.
+      let showingLocal = readyRef.current;
+      let fallback: PeptimeStore | null = null;
       try {
         setSyncState("syncing");
-        const client = createSupabaseBrowserClient();
-        const { data } = await client.auth.getUser();
-        if (!data.user) throw new Error("No authenticated Supabase user");
+        const client = clientRef.current ?? createSupabaseBrowserClient();
+        if (!showingLocal) {
+          // Show this device's copy before any network request so the app
+          // also opens offline. The session is read from local cookies; if
+          // that stalls (an expired token refreshing offline), fall back to
+          // the last signed-in user on this device.
+          const session = await withTimeout(client.auth.getSession().catch(() => null), 1500);
+          const localUserId = session && !session.error ? session.data.session?.user.id ?? null : readStorage(LAST_USER_KEY);
+          const local = localUserId ? readStoredStore(`${STORAGE_KEY}:${localUserId}`) : null;
+          if (!cancelled && localUserId && local?.onboardingComplete) {
+            userIdRef.current = localUserId;
+            setActiveUserId(localUserId);
+            setStore(local);
+            setReady(true);
+            showingLocal = true;
+          }
+        }
+        const { data, error: userError } = await client.auth.getUser();
+        if (!data.user) throw userError ?? new Error("No authenticated Supabase user");
+        if (cancelled) return;
+        const userId = data.user.id;
         clientRef.current = client;
-        userIdRef.current = data.user.id;
-        setActiveUserId(data.user.id);
-        const scopedKey = `${STORAGE_KEY}:${data.user.id}`;
-        const scopedSaved = localStorage.getItem(scopedKey);
-        const saved = scopedSaved ?? localStorage.getItem(STORAGE_KEY);
-        const local = saved ? normalizeStoreIds(JSON.parse(saved)) : normalizeStoreIds(initialStore);
-        cached = saved ? local : null;
+        userIdRef.current = userId;
+        setActiveUserId(userId);
+        writeStorage(LAST_USER_KEY, userId);
+        // Stop queued saves and let a running one finish. Unsent edits are in
+        // local storage and are replayed against the last synced copy below.
+        syncEpoch.current += 1;
+        await saveQueue.current.catch(() => undefined);
+        const scopedKey = `${STORAGE_KEY}:${userId}`;
+        const scopedLocal = readStoredStore(scopedKey);
+        const legacyLocal = scopedLocal ? null : readStoredStore(STORAGE_KEY);
+        const local = scopedLocal ?? legacyLocal ?? normalizeStoreIds(initialStore);
+        fallback = scopedLocal ?? legacyLocal;
+        const baseline = recoveryMode.current ? null : readStoredStore(`${scopedKey}:synced`);
         const remote = await loadRemoteStore(client, local);
+        if (baseline && remote.hasData && remote.orphanLogCount === 0) {
+          // This device has synced before, so its unsent edits are exactly the
+          // difference from the last synced copy. Records missing from the
+          // account without a local edit were deleted on another device.
+          await saveRemoteStore(client, userId, local, baseline);
+          const synced = rebaseStore(remote.store, baseline, local);
+          if (cancelled) return;
+          recoveryMode.current = false;
+          setRecoveryActive(false);
+          setRecoveryCounts(null);
+          lastSyncedStore.current = synced;
+          persistSynced(userId, synced);
+          // Edits made while this ran are replayed too; the save effect then
+          // uploads whatever still differs from the synced copy.
+          skipFirstSync.current = false;
+          const replayOver = showingLocal;
+          setStore(current => rebaseStore(remote.store, baseline, replayOver ? current : local));
+          setSyncError(null);
+          setSyncState("synced");
+          hydrateFailures.current = 0;
+          lastHydratedAt.current = Date.now();
+          setReady(true);
+          return;
+        }
         const [syncSnapshot, deviceSnapshot] = await Promise.all([
-          client.from("sync_state").select("entities").eq("user_id", data.user.id).maybeSingle(),
-          readLocalRecovery(data.user.id),
+          client.from("sync_state").select("entities").eq("user_id", userId).maybeSingle(),
+          readLocalRecovery(userId),
         ]);
+        if (cancelled) return;
         if (syncSnapshot.error) console.warn("Peptime recovery snapshot unavailable", syncSnapshot.error.code);
         const serverCopy = storeFromSyncEntities(syncSnapshot.data?.entities, remote.store);
-        const scopedCopy = scopedSaved ? local : !remote.hasData && saved ? local : undefined;
+        const scopedCopy = scopedLocal ?? (!remote.hasData && legacyLocal ? legacyLocal : undefined);
         const recovered = visibleRecoveryStore(remote.store, remote.hasData, serverCopy, deviceSnapshot?.store, scopedCopy);
         // The retired sync client generated false conflicts when it compared
         // differently normalized copies of the same records. Keep its snapshot
         // available for export, but pause writes only for records actually
         // missing from the original tables or logs without a peptide row.
+        // Once this device has a synced copy, this check is no longer needed.
         recoveryMode.current = recovered.recovered || remote.orphanLogCount > 0;
         setRecoveryActive(recoveryMode.current);
         const remoteBaseline = remote.hasData ? remote.store : { ...remote.store, peptides: [], mixGroups: [], logs: [], dailyNotes: [], purchasePlans: [], todayAdditions: [], onboardingComplete: false };
         setRecoveryCounts(recoveryMode.current ? missingRecoveryCounts(remoteBaseline, recovered.store) : null);
         lastSyncedStore.current = recoveryMode.current ? null : remoteBaseline;
+        if (!recoveryMode.current) persistSynced(userId, remoteBaseline);
         const next = recovered.store;
-        cached = next.onboardingComplete ? next : cached;
         setSyncError(recoveryMode.current ? "Automatisk kontosynk är pausad för att skydda uppgifterna. Exportera en fullständig kopia i Inställningar." : null);
         setSyncState(recoveryMode.current ? "error" : remote.hasData ? "synced" : "local");
-        if (!cancelled) {
-          hydrateFailures.current = 0;
-          skipFirstSync.current = true;
-          setStore(next);
-          setReady(true);
-        }
+        hydrateFailures.current = 0;
+        lastHydratedAt.current = Date.now();
+        skipFirstSync.current = true;
+        setStore(next);
+        setReady(true);
       } catch (error) {
         console.error("Peptime Supabase hydration error", error);
-        setSyncError(syncErrorMessage(error));
+        if (cancelled) return;
+        // Keep working from this device's copy. Edits stay local until the
+        // next successful hydration replays them against the synced copy.
         clientRef.current = null;
-        userIdRef.current = null;
-        if (!cancelled) {
-          if (cached?.onboardingComplete) { setStore(cached); setReady(true); }
+        setSyncError(isOffline() ? offlineMessage : syncErrorMessage(error));
+        setSyncState("error");
+        if (!showingLocal) {
+          if (fallback?.onboardingComplete) { setStore(fallback); setReady(true); }
           else setReady(false);
-          setSyncState("error");
-          hydrateFailures.current += 1;
-          const delay = Math.min(30000, 3000 * hydrateFailures.current);
-          retryTimer = window.setTimeout(() => setHydrateAttempt(value => value + 1), delay);
         }
+        hydrateFailures.current += 1;
+        const delay = Math.min(30000, 3000 * hydrateFailures.current);
+        retryTimer = window.setTimeout(() => setHydrateAttempt(value => value + 1), delay);
       }
     }
     hydrate();
@@ -216,19 +294,26 @@ function useStore() {
     if (!ready) return;
     let retryTimer: number | undefined;
     const key = userIdRef.current ? `${STORAGE_KEY}:${userIdRef.current}` : STORAGE_KEY;
-    localStorage.setItem(key, JSON.stringify(store));
+    writeStorage(key, JSON.stringify(store));
     if (recoveryMode.current) return;
     if (!clientRef.current || !userIdRef.current) return;
     if (skipFirstSync.current) { skipFirstSync.current = false; return; }
     const client = clientRef.current;
     const userId = userIdRef.current;
     const epoch = syncEpoch.current;
-    const timer = window.setTimeout(async () => {
+    let started = false;
+    const run = async () => {
+      if (started) return;
+      started = true;
+      if (pendingSave.current === run) pendingSave.current = null;
       try {
         saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
           if (recoveryMode.current || epoch !== syncEpoch.current) return;
           setSyncState("syncing");
-          lastSyncedStore.current = await saveRemoteStore(client, userId, store, lastSyncedStore.current ?? store);
+          const synced = await saveRemoteStore(client, userId, store, lastSyncedStore.current ?? store);
+          if (epoch !== syncEpoch.current) return;
+          lastSyncedStore.current = synced;
+          persistSynced(userId, synced);
           saveFailures.current = 0;
           setSyncError(null);
           setSyncState("synced");
@@ -237,15 +322,36 @@ function useStore() {
       }
       catch (error) {
         console.error("Peptime Supabase sync error", error);
-        setSyncError(syncErrorMessage(error));
+        setSyncError(isOffline() ? offlineMessage : syncErrorMessage(error));
         setSyncState("error");
         saveFailures.current += 1;
         const delay = Math.min(30000, 3000 * saveFailures.current);
         retryTimer = window.setTimeout(() => setSaveAttempt(value => value + 1), delay);
       }
-    }, 650);
-    return () => { window.clearTimeout(timer); if (retryTimer) window.clearTimeout(retryTimer); };
+    };
+    pendingSave.current = run;
+    const timer = window.setTimeout(run, 650);
+    return () => { window.clearTimeout(timer); if (pendingSave.current === run) pendingSave.current = null; if (retryTimer) window.clearTimeout(retryTimer); };
   }, [ready, store, saveAttempt]);
+  useEffect(() => {
+    // Phones keep the app suspended for days: send pending edits right away
+    // when it is hidden, and fetch other devices' changes when it returns.
+    const flush = () => pendingSave.current?.();
+    const refresh = () => {
+      if (!readyRef.current || recoveryMode.current || Date.now() - lastHydratedAt.current < 30_000) return;
+      setHydrateAttempt(value => value + 1);
+    };
+    const onVisibility = () => { if (document.visibilityState === "hidden") flush(); else refresh(); };
+    const onOnline = () => setHydrateAttempt(value => value + 1);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("online", onOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("online", onOnline);
+    };
+  }, []);
   const retrySync = () => {
     if (recoveryMode.current) { setHydrateAttempt(value => value + 1); return; }
     if (clientRef.current && userIdRef.current && ready) setSaveAttempt(value => value + 1);
@@ -262,12 +368,14 @@ function useStore() {
     let committed = false;
     try {
       lastSyncedStore.current = await saveRemoteStore(client, userId, store, lastSyncedStore.current);
+      persistSynced(userId, lastSyncedStore.current);
       flushed = true;
       const result = await client.rpc("import_shared_schedule", { p_code: code.trim().toUpperCase() });
       if (result.error) throw result.error;
       committed = true;
       const remote = await loadRemoteStore(client, store);
       lastSyncedStore.current = remote.store;
+      persistSynced(userId, remote.store);
       skipFirstSync.current = true;
       setStore(remote.store);
       setSyncError(null);
@@ -323,7 +431,7 @@ function Onboarding({ store, update }: { store: PeptimeStore; update: React.Disp
   const [examples, setExamples] = useState(true);
   const sampleUnits = syringeUnits(100, 10, 2);
   const finish = () => update(s => ({ ...s, peptides: examples ? s.peptides : [], mixGroups: examples ? s.mixGroups : [], onboardingComplete: true }));
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-background p-5"><div className="w-full max-w-[430px]">
+  return <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-background"><div className="grid min-h-full place-items-center px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-[calc(1.25rem+env(safe-area-inset-top))]"><div className="w-full max-w-[430px]">
     <div className="mb-10 flex items-center justify-between"><span className="text-sm font-semibold tracking-[0.16em]">PEPTIME</span><span className="text-xs text-muted-foreground">{step + 1} / 4</span></div>
     <div className="mb-8 flex gap-1.5">{[0,1,2,3].map(i => <span key={i} className={`h-1 flex-1 rounded-full ${i <= step ? "bg-primary" : "bg-muted"}`} />)}</div>
     {step === 0 && <><div className="mb-6 grid size-14 place-items-center rounded-2xl bg-accent text-accent-foreground"><ShieldCheck className="size-7" /></div><h1 className="text-3xl font-medium tracking-[-.04em]">Din privata forskningslogg</h1><p className="mt-4 leading-7 text-muted-foreground">Peptime hjälper dig hålla koll på dina peptider!</p><Card className="mt-7 p-4"><p className="text-sm leading-6">{disclaimer}</p></Card></>}
@@ -331,7 +439,7 @@ function Onboarding({ store, update }: { store: PeptimeStore; update: React.Disp
     {step === 2 && <><p className="text-xs font-semibold uppercase tracking-[.17em] text-accent-foreground">Vialmatematik</p><h1 className="mt-2 text-3xl font-medium tracking-[-.04em]">Dina värden, tydligt</h1><Card className="mt-7 overflow-hidden"><div className="grid grid-cols-2 divide-x divide-border"><div className="p-4"><span className="text-xs text-muted-foreground">Vial</span><p className="mt-1 text-xl tabular-nums">10 mg</p></div><div className="p-4"><span className="text-xs text-muted-foreground">BAC-vatten</span><p className="mt-1 text-xl tabular-nums">2 ml</p></div></div><div className="border-t border-border bg-muted/50 p-5"><p className="text-sm text-muted-foreground">10 mg + 2 ml = 50 mcg per IU</p><p className="mt-3 text-2xl font-medium tabular-nums">100 mcg = {n(sampleUnits)} IU</p></div></Card><label className="mt-6 flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-border bg-card px-4"><span><span className="block text-sm">Lägg till exempelpeptider</span><span className="text-xs text-muted-foreground">Tydligt märkta och lätta att ta bort</span></span><Switch checked={examples} onCheckedChange={setExamples} /></label></>}
     {step === 3 && <><div className="mb-6 grid size-14 place-items-center rounded-2xl bg-accent text-accent-foreground"><Sparkles className="size-7" /></div><h1 className="text-3xl font-bold tracking-[-.04em]">Redo när du är</h1><p className="mt-4 leading-7 text-muted-foreground">Öppna appen och tryck Ta dos. Injektionsplats kan väljas direkt på kortet när du vill logga den.</p><Card className="mt-7 p-5"><p className="text-sm text-muted-foreground">Standard</p><p className="mt-2">{store.settings.syringe} · Europe/Stockholm · Följer systemets utseende</p></Card></>}
     <div className="mt-10 flex gap-3">{step > 0 && <Button variant="outline" className="h-14 flex-1 rounded-2xl" onClick={() => setStep(step - 1)}>Tillbaka</Button>}<Button className="h-14 flex-[2] rounded-2xl text-base" onClick={() => step < 3 ? setStep(step + 1) : finish()}>{step < 3 ? "Fortsätt" : "Öppna Peptime"}</Button></div>
-  </div></div>;
+  </div></div></div>;
 }
 
 function TodayView({ store, update, openCalendar }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; openCalendar: () => void }) {
@@ -461,10 +569,10 @@ function ScheduleFields({ value, set }: { value: Schedule; set: (part: Partial<S
   const weekdayNames=["Mån","Tis","Ons","Tor","Fre","Lör","Sön"];
   return <div className="space-y-4 rounded-2xl border border-border p-4">
     <div className="flex items-center justify-between"><div><p className="font-medium">Schema</p><p className="mt-1 text-xs text-muted-foreground">Visas på Idag när schemat gäller.</p></div><label className="flex items-center gap-2 text-sm">Pausad <Switch checked={value.paused} onCheckedChange={paused=>set({paused})}/></label></div>
-    <label className="block text-xs text-muted-foreground">Frekvens<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3" value={value.frequency} onChange={e=>{const frequency=e.target.value as Schedule["frequency"];set({frequency,slot:frequency==="as_needed"?"as_needed":value.slot==="as_needed"?"evening":value.slot})}}><option value="daily">Varje dag</option><option value="weekdays">Valda veckodagar</option><option value="every_n_days">Var N:e dag</option><option value="as_needed">Vid behov</option></select></label>
+    <label className="block text-xs text-muted-foreground">Frekvens<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3 text-base" value={value.frequency} onChange={e=>{const frequency=e.target.value as Schedule["frequency"];set({frequency,slot:frequency==="as_needed"?"as_needed":value.slot==="as_needed"?"evening":value.slot})}}><option value="daily">Varje dag</option><option value="weekdays">Valda veckodagar</option><option value="every_n_days">Var N:e dag</option><option value="as_needed">Vid behov</option></select></label>
     {value.frequency==="weekdays"&&<div className="flex flex-wrap gap-1.5">{weekdayNames.map((label,index)=><button type="button" key={label} onClick={()=>set({weekdays:value.weekdays.includes(index)?value.weekdays.filter(day=>day!==index):[...value.weekdays,index].sort()})} className={`min-h-9 rounded-full border px-3 text-xs ${value.weekdays.includes(index)?"border-primary bg-accent text-accent-foreground":"border-border text-muted-foreground"}`}>{label}</button>)}</div>}
     {value.frequency==="every_n_days"&&<div className="grid grid-cols-2 gap-3"><label className="text-xs text-muted-foreground">Var N:e dag<Input min={2} className="mt-1.5 h-11" type="number" value={value.everyNDays??2} onChange={e=>set({everyNDays:Math.max(2,Number(e.target.value))})}/></label><label className="text-xs text-muted-foreground">Startdatum<Input className="mt-1.5 h-11" type="date" value={value.anchorDate??""} onChange={e=>set({anchorDate:e.target.value||undefined})}/></label></div>}
-    {value.frequency!=="as_needed"&&<div className="grid grid-cols-2 gap-3"><label className="text-xs text-muted-foreground">Tidsdel<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3" value={value.slot} onChange={e=>set({slot:e.target.value as Slot})}>{Object.entries(slotNames).filter(([key])=>key!=="as_needed").map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label className="text-xs text-muted-foreground">Klockslag<Input className="mt-1.5 h-11" type="time" value={value.time} onChange={e=>set({time:e.target.value})}/></label></div>}
+    {value.frequency!=="as_needed"&&<div className="grid grid-cols-2 gap-3"><label className="text-xs text-muted-foreground">Tidsdel<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3 text-base" value={value.slot} onChange={e=>set({slot:e.target.value as Slot})}>{Object.entries(slotNames).filter(([key])=>key!=="as_needed").map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label className="text-xs text-muted-foreground">Klockslag<Input className="mt-1.5 h-11" type="time" value={value.time} onChange={e=>set({time:e.target.value})}/></label></div>}
     <details><summary className="min-h-11 cursor-pointer py-3 text-sm">Cykel <span className="text-muted-foreground">(valfritt)</span></summary><div className="grid grid-cols-3 gap-2"><label className="col-span-3 text-xs text-muted-foreground">Startdatum<Input className="mt-1.5 h-11" type="date" value={value.cycleStart??""} onChange={e=>set({cycleStart:e.target.value||undefined})}/></label><label className="text-xs text-muted-foreground">Veckor på<Input min={1} className="mt-1.5 h-11" type="number" value={value.weeksOn??""} onChange={e=>set({weeksOn:e.target.value?Number(e.target.value):undefined})}/></label><label className="text-xs text-muted-foreground">Veckor av<Input min={0} className="mt-1.5 h-11" type="number" value={value.weeksOff??""} onChange={e=>set({weeksOff:e.target.value?Number(e.target.value):undefined})}/></label></div></details>
   </div>;
 }
@@ -476,7 +584,7 @@ function PeptidesView({ store, update, openPlanner, openSchedules, openInsights 
   const save=()=>{const typedGroup=draft.mixGroupId?.trim();const canonicalGroup=existingGroups.find(group=>groupKey(group)===groupKey(typedGroup))??typedGroup;const previous=store.peptides.find(peptide=>peptide.id===draft.id);const preparationChanged=Boolean(previous&&(previous.vialMg!==draft.vialMg||previous.waterMl!==draft.waterMl));const item={...draft,id:draft.id||uid(),shortCode:draft.shortCode||draft.name.slice(0,3),currentVialId:preparationChanged?uid():draft.currentVialId,remainingMg:preparationChanged?0:draft.id?draft.remainingMg:draft.vialMg,mixGroupId:canonicalGroup||undefined};update(s=>{const hasGroup=canonicalGroup&&s.mixGroups.some(group=>groupKey(group.name)===groupKey(canonicalGroup));const mixGroups=canonicalGroup&&!hasGroup?[...s.mixGroups,{name:canonicalGroup,...peptideSchedule(item)}]:s.mixGroups;return {...s,mixGroups,peptides:draft.id?s.peptides.map(p=>p.id===draft.id?item:p):[...s.peptides,item]}});setEditing(null);setAdding(false)};
   const addToday=(peptide:Peptide)=>{const date=stockholmDate();const key=`${date}:${scheduleTargetKey(peptide)}`;update(s=>({...s,todayAdditions:[...new Set([...s.todayAdditions,key])]}))};
   return <><PageHeader eyebrow="Dina ämnen" title="Peptider" action={<div className="flex gap-2"><Button size="icon" variant="outline" className="size-11 rounded-full" onClick={openSchedules} aria-label="Öppna scheman"><CalendarDays/></Button><Button size="icon" variant="outline" className="size-11 rounded-full" onClick={openPlanner} aria-label="Öppna inköpsplan"><ShoppingCart/></Button><Button size="icon" className="size-11 rounded-full" onClick={()=>{setEditing({...emptyPeptide,id:""} as Peptide);setAdding(true)}} aria-label="Lägg till peptid"><Plus/></Button></div>}/>{active.length===0?<Card className="p-7 text-center"><FlaskConical className="mx-auto size-7 text-muted-foreground"/><p className="mt-4 font-medium">Inga peptider ännu</p><Button className="mt-5 h-11 rounded-xl" onClick={()=>{setEditing({...emptyPeptide,id:""} as Peptide);setAdding(true)}}>Lägg till peptid</Button></Card>:<div className="space-y-3">{active.map(p=>{const schedule=resolvedSchedule(p,store.mixGroups);const days=vialDaysLeft(p);const inventoryDays=inventoryDaysLeft(p,store);return <Card key={p.id} className="flex min-h-[84px] items-center gap-2 p-3"><button onClick={()=>setEditing(p)} className="flex min-h-[60px] min-w-0 flex-1 items-center gap-4 text-left"><ChemicalBadge items={[p]}/><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate font-medium">{p.name}</p>{p.example&&<span className="rounded bg-muted px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground">Exempel</span>}</div><p className="mt-1 truncate text-sm text-muted-foreground">{n(p.doseMcg)} mcg · {n(syringeUnits(p.doseMcg,p.vialMg,p.waterMl))} IU · {schedule.paused?"Pausad":schedule.frequency==="as_needed"?"Vid behov":`${slotNames[schedule.slot]} ${schedule.time}`}</p>{inventoryDays!==null&&inventoryDays<=15?<p className="mt-1 flex items-center gap-1 font-medium text-amber-700 dark:text-amber-200"><TriangleAlert className="size-3.5"/><span className="text-xs">Lågt lager · {inventoryDays===0?"slut":`ca ${inventoryDays} dagar kvar`}</span></p>:days!==null&&<p className={`mt-1 font-mono text-[10px] ${days<=0?"text-destructive":"text-muted-foreground"}`}>{days>0?`Vial · ${days} d kvar enligt din gräns`:"Vial · angiven gräns passerad"}</p>}</div><ChevronRight className="size-5 shrink-0 text-muted-foreground"/></button><Button variant="ghost" size="icon" className="size-11 shrink-0" onClick={()=>openInsights(p.id)} aria-label={`Visa kurvor för ${p.name}`}><BarChart3/></Button>{schedule.frequency==="as_needed"&&!schedule.paused&&<Button variant="outline" className="h-11 shrink-0 px-3 text-xs" onClick={()=>addToday(p)}>Lägg till idag</Button>}</Card>})}</div>}
-    <Dialog open={!!editing} onOpenChange={open=>{if(!open){setEditing(null);setAdding(false)}}}><DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>{adding?"Lägg till peptid":"Peptidinställningar"}</DialogTitle><DialogDescription>Alla värden är dina egna logguppgifter.</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><label className="col-span-2 text-xs text-muted-foreground">Namn<Input className="mt-1.5 h-11" value={draft.name} onChange={e=>set({name:e.target.value})} placeholder="Fritextnamn"/></label><label className="text-xs text-muted-foreground">Kortkod<Input className="mt-1.5 h-11 uppercase" maxLength={4} value={draft.shortCode} onChange={e=>set({shortCode:e.target.value.toLocaleUpperCase("sv-SE")})}/></label><label className="text-xs text-muted-foreground">Dos (mcg)<DecimalInput value={draft.doseMcg} onChange={doseMcg=>set({doseMcg})}/></label><div className="col-span-2"><p className="text-xs text-muted-foreground">Accentfärg</p><div className="mt-2 flex gap-2">{Object.entries(compoundColors).map(([color,value])=><button key={color} type="button" aria-label={compoundColorLabels[color]} aria-pressed={draft.color===color} onClick={()=>set({color})} style={{backgroundColor:value}} className={`size-11 rounded-full border-2 ${draft.color===color?"border-foreground":"border-transparent"}`}/>)}</div></div><label className="text-xs text-muted-foreground">Vial (mg)<DecimalInput value={draft.vialMg} onChange={vialMg=>set({vialMg})}/></label><label className="text-xs text-muted-foreground">BAC-vatten (ml)<DecimalInput value={draft.waterMl} onChange={waterMl=>set({waterMl})}/></label><label className="text-xs text-muted-foreground">Administrering<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3" value={draft.route} onChange={e=>set({route:e.target.value as Peptide["route"]})}><option value="subcutaneous">Subkutan</option><option value="intranasal">Intranasal</option><option value="oral">Oral</option><option value="topical">Topikal</option></select></label><div className="text-xs text-muted-foreground"><label>Mixgrupp<Input className="mt-1.5 h-11" value={draft.mixGroupId??""} onChange={e=>set({mixGroupId:e.target.value||undefined})} placeholder="Valfritt"/></label>{existingGroups.length>0&&<div className="mt-2 flex flex-wrap gap-1.5">{existingGroups.map(group=><button type="button" key={group} onClick={()=>set({mixGroupId:group})} className={`min-h-8 rounded-full border px-2.5 text-[11px] ${groupKey(draft.mixGroupId)===groupKey(group)?"border-primary bg-accent text-accent-foreground":"border-border text-muted-foreground"}`}>{group}</button>)}</div>}</div></div><div className="rounded-2xl bg-muted p-4"><p className="text-xs text-muted-foreground">Automatisk vialmatematik</p>{validAmounts?<><p className="mt-2 text-lg font-medium tabular-nums">{n(draft.vialMg/draft.waterMl)} mg/ml · {n((draft.vialMg/draft.waterMl)*10)} mcg/IU</p><p className="mt-1 text-sm text-accent-foreground">{n(draft.doseMcg)} mcg = {n(units)} IU</p></>:<p className="mt-2 text-sm text-muted-foreground">Fyll i dos, vial och BAC-vatten för att se uträkningen.</p>}</div>{draft.mixGroupId?<div className="rounded-2xl border border-border p-4"><p className="text-sm">Schemat styrs av mixgruppen {draft.mixGroupId}</p><Button type="button" variant="outline" className="mt-3 h-11 w-full" onClick={()=>setEditingGroup(groupForDraft??{name:draft.mixGroupId!,...peptideSchedule(draft)})}>Redigera gruppens schema</Button></div>:<ScheduleFields value={peptideSchedule(draft)} set={part=>set(part)}/>}<label className="flex min-h-12 items-center justify-between"><span className="text-sm">Fastande flagga</span><Switch checked={draft.fasted} onCheckedChange={v=>set({fasted:v})}/></label><label className="text-xs text-muted-foreground">Peptidanteckning<Textarea className="mt-1.5" value={draft.notes} onChange={e=>set({notes:e.target.value})} placeholder="Rekonstituering, egen påminnelse…"/></label><Button disabled={!draft.name.trim()||!validAmounts} className="h-12" onClick={save}>Spara peptid</Button>{draft.id&&<><Button variant="outline" className="h-11" onClick={()=>set({currentVialId:uid(),remainingMg:draft.vialMg,reconstitutedAt:new Date().toISOString()})}><RotateCcw/> Öppnade ny vial</Button><Button variant="ghost" className="h-11 text-muted-foreground" onClick={()=>{update(s=>({...s,peptides:s.peptides.map(p=>p.id===draft.id?{...p,archived:true}:p)}));setEditing(null)}}><Archive/> Arkivera</Button></>}</DialogContent></Dialog>
+    <Dialog open={!!editing} onOpenChange={open=>{if(!open){setEditing(null);setAdding(false)}}}><DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>{adding?"Lägg till peptid":"Peptidinställningar"}</DialogTitle><DialogDescription>Alla värden är dina egna logguppgifter.</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><label className="col-span-2 text-xs text-muted-foreground">Namn<Input className="mt-1.5 h-11" value={draft.name} onChange={e=>set({name:e.target.value})} placeholder="Fritextnamn"/></label><label className="text-xs text-muted-foreground">Kortkod<Input className="mt-1.5 h-11 uppercase" maxLength={4} value={draft.shortCode} onChange={e=>set({shortCode:e.target.value.toLocaleUpperCase("sv-SE")})}/></label><label className="text-xs text-muted-foreground">Dos (mcg)<DecimalInput value={draft.doseMcg} onChange={doseMcg=>set({doseMcg})}/></label><div className="col-span-2"><p className="text-xs text-muted-foreground">Accentfärg</p><div className="mt-2 flex gap-2">{Object.entries(compoundColors).map(([color,value])=><button key={color} type="button" aria-label={compoundColorLabels[color]} aria-pressed={draft.color===color} onClick={()=>set({color})} style={{backgroundColor:value}} className={`size-11 rounded-full border-2 ${draft.color===color?"border-foreground":"border-transparent"}`}/>)}</div></div><label className="text-xs text-muted-foreground">Vial (mg)<DecimalInput value={draft.vialMg} onChange={vialMg=>set({vialMg})}/></label><label className="text-xs text-muted-foreground">BAC-vatten (ml)<DecimalInput value={draft.waterMl} onChange={waterMl=>set({waterMl})}/></label><label className="text-xs text-muted-foreground">Administrering<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3 text-base" value={draft.route} onChange={e=>set({route:e.target.value as Peptide["route"]})}><option value="subcutaneous">Subkutan</option><option value="intranasal">Intranasal</option><option value="oral">Oral</option><option value="topical">Topikal</option></select></label><div className="text-xs text-muted-foreground"><label>Mixgrupp<Input className="mt-1.5 h-11" value={draft.mixGroupId??""} onChange={e=>set({mixGroupId:e.target.value||undefined})} placeholder="Valfritt"/></label>{existingGroups.length>0&&<div className="mt-2 flex flex-wrap gap-1.5">{existingGroups.map(group=><button type="button" key={group} onClick={()=>set({mixGroupId:group})} className={`min-h-8 rounded-full border px-2.5 text-[11px] ${groupKey(draft.mixGroupId)===groupKey(group)?"border-primary bg-accent text-accent-foreground":"border-border text-muted-foreground"}`}>{group}</button>)}</div>}</div></div><div className="rounded-2xl bg-muted p-4"><p className="text-xs text-muted-foreground">Automatisk vialmatematik</p>{validAmounts?<><p className="mt-2 text-lg font-medium tabular-nums">{n(draft.vialMg/draft.waterMl)} mg/ml · {n((draft.vialMg/draft.waterMl)*10)} mcg/IU</p><p className="mt-1 text-sm text-accent-foreground">{n(draft.doseMcg)} mcg = {n(units)} IU</p></>:<p className="mt-2 text-sm text-muted-foreground">Fyll i dos, vial och BAC-vatten för att se uträkningen.</p>}</div>{draft.mixGroupId?<div className="rounded-2xl border border-border p-4"><p className="text-sm">Schemat styrs av mixgruppen {draft.mixGroupId}</p><Button type="button" variant="outline" className="mt-3 h-11 w-full" onClick={()=>setEditingGroup(groupForDraft??{name:draft.mixGroupId!,...peptideSchedule(draft)})}>Redigera gruppens schema</Button></div>:<ScheduleFields value={peptideSchedule(draft)} set={part=>set(part)}/>}<label className="flex min-h-12 items-center justify-between"><span className="text-sm">Fastande flagga</span><Switch checked={draft.fasted} onCheckedChange={v=>set({fasted:v})}/></label><label className="text-xs text-muted-foreground">Peptidanteckning<Textarea className="mt-1.5" value={draft.notes} onChange={e=>set({notes:e.target.value})} placeholder="Rekonstituering, egen påminnelse…"/></label><Button disabled={!draft.name.trim()||!validAmounts} className="h-12" onClick={save}>Spara peptid</Button>{draft.id&&<><Button variant="outline" className="h-11" onClick={()=>set({currentVialId:uid(),remainingMg:draft.vialMg,reconstitutedAt:new Date().toISOString()})}><RotateCcw/> Öppnade ny vial</Button><Button variant="ghost" className="h-11 text-muted-foreground" onClick={()=>{update(s=>({...s,peptides:s.peptides.map(p=>p.id===draft.id?{...p,archived:true}:p)}));setEditing(null)}}><Archive/> Arkivera</Button></>}</DialogContent></Dialog>
     <Dialog open={!!editingGroup} onOpenChange={open=>!open&&setEditingGroup(null)}><DialogContent className="max-h-[88dvh] overflow-y-auto"><DialogHeader><DialogTitle>Mixgrupp {editingGroup?.name}</DialogTitle><DialogDescription>Ett schema och en Ta dos för hela gruppen.</DialogDescription></DialogHeader>{editingGroup&&<ScheduleFields value={editingGroup} set={part=>setEditingGroup({...editingGroup,...part})}/>}<Button className="h-12" onClick={()=>{if(editingGroup)update(s=>({...s,mixGroups:[...s.mixGroups.filter(group=>groupKey(group.name)!==groupKey(editingGroup.name)),editingGroup]}));setEditingGroup(null)}}>Spara gruppschema</Button></DialogContent></Dialog>
   </>;
 }
@@ -507,6 +615,12 @@ function CalendarView({ store, update, onBack }: { store: PeptimeStore; update: 
   </>;
 }
 
+function subscribeOnline(onChange: () => void) {
+  window.addEventListener("online", onChange);
+  window.addEventListener("offline", onChange);
+  return () => { window.removeEventListener("online", onChange); window.removeEventListener("offline", onChange); };
+}
+
 export function PeptimeApp({ userEmail }: { userEmail?: string }) {
   const [store,update,ready,syncState,retrySync,syncError,userId,recoveryActive,recoveryCounts,restoreMissingRecords,importSharedSchedule]=useStore(); const [view,setView]=useState("today");
   const [insightPeptideId,setInsightPeptideId]=useState<string|null>(null);
@@ -514,8 +628,12 @@ export function PeptimeApp({ userEmail }: { userEmail?: string }) {
   const [calendarReturnView,setCalendarReturnView]=useState<"today"|"insights">("today");
   const openCalendar=(from:"today"|"insights")=>{setCalendarReturnView(from);setView("calendar")};
   const openPeptideInsights=(id:string,from:"peptides"|"insights")=>{setInsightPeptideId(id);setInsightReturnView(from);setView("peptide-insights")};
-  useEffect(()=>{const media=window.matchMedia("(prefers-color-scheme: dark)");const apply=()=>{const mode=store.settings.themeMode??"system";document.documentElement.classList.toggle("dark",mode==="dark"||(mode==="system"&&media.matches))};apply();media.addEventListener("change",apply);return()=>media.removeEventListener("change",apply)},[store.settings.themeMode]);
+  // Views compute "today" when they render; remount them when the date changes while the app stays open.
+  const [day,setDay]=useState(()=>stockholmDate());
+  useEffect(()=>{const check=()=>setDay(stockholmDate());const timer=window.setInterval(check,60_000);document.addEventListener("visibilitychange",check);return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",check)}},[]);
+  const online=useSyncExternalStore(subscribeOnline,()=>navigator.onLine,()=>true);
+  useEffect(()=>{const media=window.matchMedia("(prefers-color-scheme: dark)");const apply=()=>applyThemeMode(store.settings.themeMode??"system");apply();media.addEventListener("change",apply);return()=>media.removeEventListener("change",apply)},[store.settings.themeMode]);
   if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><RotateCcw className="mx-auto size-7 text-muted-foreground"/><h1 className="mt-4 text-xl font-medium">Kunde inte hämta ditt konto</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p>{syncError&&<p className="mt-3 break-words text-sm text-destructive">{syncError}</p>}<Button className="mt-5 h-12 w-full" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
   if(!store.onboardingComplete)return <Onboarding store={store} update={update}/>;
-  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-24 sm:px-6">{recoveryActive&&<button type="button" onClick={()=>setView("settings")} className="mt-4 w-full rounded-2xl border border-amber-600/40 bg-amber-500/10 p-3 text-left text-sm leading-5 text-foreground">Återställningsläge aktivt. Kontosynk är pausad för att skydda uppgifterna. Exportera data i Inställningar.</button>}{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} onBack={()=>setView("peptides")} importSchedule={importSharedSchedule} importEnabled={Boolean(userId)&&!recoveryActive&&syncState!=="error"&&syncState!=="syncing"}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId} preserveLocal={recoveryActive} recoveryCounts={recoveryCounts} restoreMissingRecords={restoreMissingRecords}/>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
+  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6">{recoveryActive&&<button type="button" onClick={()=>setView("settings")} className="mt-[calc(1rem+env(safe-area-inset-top))] w-full rounded-2xl border border-amber-600/40 bg-amber-500/10 p-3 text-left text-sm leading-5 text-foreground">Återställningsläge aktivt. Kontosynk är pausad för att skydda uppgifterna. Exportera data i Inställningar.</button>}<Fragment key={day}>{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} onBack={()=>setView("peptides")} importSchedule={importSharedSchedule} importEnabled={Boolean(userId)&&!recoveryActive&&syncState!=="error"&&syncState!=="syncing"}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId} preserveLocal={recoveryActive} recoveryCounts={recoveryCounts} restoreMissingRecords={restoreMissingRecords}/>}</Fragment>{!online&&<div role="status" className="pointer-events-none fixed inset-x-0 bottom-[calc(86px+env(safe-area-inset-bottom))] z-40 mx-auto w-fit rounded-full bg-foreground/90 px-4 py-2 text-xs font-medium text-background shadow-lg">Offline · ändringar sparas på enheten</div>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
 }

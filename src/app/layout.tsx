@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { PwaUpdatePrompt } from "@/components/pwa-update-prompt";
+import { themeBootScript } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +11,9 @@ export const metadata: Metadata = {
   icons: {
     apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Peptime" },
+  // "default" follows the system appearance; "black-translucent" always draws
+  // white status bar text, which is unreadable in light mode.
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "Peptime" },
 };
 
 export const viewport: Viewport = {
@@ -28,6 +31,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className="h-full antialiased"
       suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}<PwaUpdatePrompt /></body>
     </html>
   );
