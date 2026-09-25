@@ -171,7 +171,8 @@ export function ScheduleSharing({ store, onBack, importSchedule, importEnabled }
       setMessage(`${imported} peptider importerades. Befintliga loggar ändrades inte.`);
       setPreview(null); setImportCode("");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Kunde inte importera schemat. Inget schema importerades.");
+      const message = reason instanceof Error ? reason.message : reason && typeof reason === "object" && "message" in reason && typeof reason.message === "string" ? reason.message : "Kunde inte importera schemat. Inget schema importerades.";
+      setError(message);
     } finally { setBusy(false); }
   };
   const currentPeptides = store.peptides.filter(peptide => !peptide.archived && !peptide.example);
