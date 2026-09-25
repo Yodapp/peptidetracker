@@ -117,7 +117,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
   const [profileResult, peptideResult, vialResult, scheduleResult, mixGroupResult, logResult, noteResult, purchasePlanResult] = await Promise.all([
     client.from("profiles").select("*").maybeSingle(),
     client.from("peptides").select("*").order("created_at"),
-    client.from("vials").select("*").is("closed_at", null),
+    client.from("vials").select("*").is("closed_at", null).order("created_at"),
     client.from("schedules").select("*").eq("active", true),
     client.from("mix_groups").select("*").eq("active", true),
     client.from("dose_logs").select("*").order("taken_at", { ascending: false }),
@@ -160,6 +160,7 @@ export async function loadRemoteStore(client: SupabaseClient, fallback: PeptimeS
       vialMg,
       waterMl: number(vial?.bac_water_ml, number(row.bac_water_ml, 1)),
       remainingMg: Math.max(0, number(vial?.remaining_mg, vialMg - (usedMg.get(row.id) ?? 0))),
+      currentVialId: vial?.id ?? undefined,
       route: row.route,
       slot: schedule?.slot ?? "as_needed",
       time: text(schedule?.clock_time, "00:00").slice(0, 5),
@@ -289,7 +290,14 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
   }
   if (changedPeptides.length) {
     results.push(await client.from("peptides").upsert(changedPeptides.map(peptide => ({ id: peptide.id, user_id: userId, name: peptide.name, short_code: peptide.shortCode, color: peptide.color, dose_amount: peptide.doseMcg, dose_unit: "mcg", vial_mg: peptide.vialMg, bac_water_ml: peptide.waterMl, route: peptide.route, fasted: peptide.fasted, fasted_note: peptide.fastedNote, mix_group_id: peptide.mixGroupId ?? null, cycle_start: peptide.mixGroupId ? null : peptide.cycleStart ?? null, weeks_on: peptide.mixGroupId ? null : peptide.weeksOn ?? null, weeks_off: peptide.mixGroupId ? null : peptide.weeksOff ?? null, default_sites: peptide.sites, last_site: peptide.lastSite ?? null, notes: peptide.notes, archived_at: peptide.archived ? new Date().toISOString() : null, is_example: peptide.example })), { onConflict: "id" }));
-    const vialBase = (peptide: Peptide) => ({ id: peptide.id, user_id: userId, peptide_id: peptide.id, bac_water_ml: peptide.waterMl, reconstituted_at: peptide.reconstitutedAt ?? null, beyond_use_days: peptide.beyondUseDays, ...(peptide.reconstitutedAt ? { opened_at: peptide.reconstitutedAt } : {}), closed_at: null });
+    for (const peptide of changedPeptides) {
+      const old = before.peptides.find(item => item.id === peptide.id);
+      if (old?.currentVialId && peptide.currentVialId && old.currentVialId !== peptide.currentVialId) {
+        const closed = await client.from("vials").update({ closed_at: new Date().toISOString() }).eq("id", old.currentVialId).eq("user_id", userId).is("closed_at", null);
+        if (closed.error) throw closed.error;
+      }
+    }
+    const vialBase = (peptide: Peptide) => ({ id: peptide.currentVialId ?? peptide.id, user_id: userId, peptide_id: peptide.id, bac_water_ml: peptide.waterMl, reconstituted_at: peptide.reconstitutedAt ?? null, beyond_use_days: peptide.beyondUseDays, ...(peptide.reconstitutedAt ? { opened_at: peptide.reconstitutedAt } : {}), closed_at: null });
     let vialResult = await client.from("vials").upsert(changedPeptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.vialMg, remaining_mg: peptide.remainingMg })), { onConflict: "id" });
     if (vialResult.error?.code === "PGRST204" || vialResult.error?.code === "42703") vialResult = await client.from("vials").upsert(changedPeptides.map(peptide => ({ ...vialBase(peptide), initial_mg: peptide.remainingMg + (usedMg.get(peptide.id) ?? 0) })), { onConflict: "id" });
     results.push(vialResult);
@@ -301,7 +309,7 @@ export async function saveRemoteStore(client: SupabaseClient, userId: string, in
       results.push(scheduleResult);
     }
   }
-  const logRows = changedLogs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.peptideId, note: log.note }));
+  const logRows = changedLogs.map(log => ({ id: log.id, user_id: userId, peptide_id: log.peptideId, planned_dose: log.plannedDose, actual_dose: log.actualDose, unit: log.unit, computed_iu: log.computedIu, slot: log.slot, taken_at: log.takenAt, scheduled_date: log.scheduledDate, status: log.status, site: log.site ?? null, mix_group_id: log.mixGroupId ?? null, vial_id: log.vialId ?? store.peptides.find(peptide => peptide.id === log.peptideId)?.currentVialId ?? log.peptideId, note: log.note }));
   if (logRows.length) {
     const logResult = await client.from("dose_logs").upsert(logRows, { onConflict: "id" });
     results.push(logResult);

@@ -39,6 +39,7 @@ export interface Peptide {
   vialMg: number;
   waterMl: number;
   remainingMg: number;
+  currentVialId?: string;
   route: Route;
   slot: Slot;
   time: string;

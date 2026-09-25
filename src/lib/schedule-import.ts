@@ -1,7 +1,7 @@
 import { resolvedSchedule } from "./schedule";
 import type { MixGroupSchedule, Peptide } from "./types";
 
-export type SharedScheduleItem = Omit<Peptide, "id" | "remainingMg" | "reconstitutedAt" | "lastSite" | "archived" | "example">;
+export type SharedScheduleItem = Omit<Peptide, "id" | "remainingMg" | "currentVialId" | "reconstitutedAt" | "lastSite" | "archived" | "example">;
 
 export function scheduleItemFromPeptide(peptide: Peptide, groups: MixGroupSchedule[]): SharedScheduleItem {
   return {

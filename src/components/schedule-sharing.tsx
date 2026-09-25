@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { PageHeader, Surface } from "@/components/peptime-ui";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { scheduleItemFromPeptide, type SharedScheduleItem } from "@/lib/schedule-import";
-import { defaultInjectionSites, syringeUnits, type MixGroupSchedule, type Peptide, type PeptimeStore, type ScheduleFrequency, type Slot } from "@/lib/types";
+import { defaultInjectionSites, syringeUnits, type MixGroupSchedule, type PeptimeStore, type ScheduleFrequency, type Slot } from "@/lib/types";
 
 type Item = SharedScheduleItem;
 type Saved = { id: string; code: string; name: string; items: Item[]; groups: MixGroupSchedule[]; createdAt: string; updatedAt: string };
@@ -134,7 +134,7 @@ function ScheduleEditor({ item, set }: { item: Item; set: (part: Partial<Item>) 
   </div>;
 }
 
-export function ScheduleSharing({ store, update, onBack }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; onBack: () => void }) {
+export function ScheduleSharing({ store, onBack, importSchedule, importEnabled }: { store: PeptimeStore; onBack: () => void; importSchedule: (code: string) => Promise<number>; importEnabled: boolean }) {
   const client = useMemo(() => createSupabaseBrowserClient(), []);
   const [userId, setUserId] = useState("");
   const [saved, setSaved] = useState<Saved[]>([]);
@@ -163,31 +163,16 @@ export function ScheduleSharing({ store, update, onBack }: { store: PeptimeStore
   };
   const remove = async () => { if (!userId || !saved.some(item => item.id === draft.id) || !window.confirm(`Ta bort ”${draft.name}”?`)) return; setBusy(true); const result = await client.from("shared_schedules").delete().eq("id", draft.id).eq("user_id", userId); if (result.error) setError(result.error.message); else { setSaved(values => values.filter(value => value.id !== draft.id)); setDraft(emptySaved()); setMessage("Schemat är borttaget."); } setBusy(false); };
   const lookup = async () => { setBusy(true); setError(""); setPreview(null); const result = await client.rpc("get_shared_schedule", { p_code: importCode.trim().toUpperCase() }); const value = result.data as Preview | null; if (result.error || !value || !Array.isArray(value.items)) setError("Koden finns inte."); else setPreview({ ...value, items: value.items.map(normalizeItem), groups: Array.isArray(value.groups) ? value.groups : [] }); setBusy(false); };
-  const importableItems = preview ? preview.items.filter(item => {
-    const name = key(item.name);
-    if (!name || store.peptides.some(peptide => key(peptide.name) === name)) return false;
-    const firstMatch = preview.items.findIndex(candidate => key(candidate.name) === name);
-    return preview.items[firstMatch] === item;
-  }) : [];
-  const duplicates = preview ? preview.items.length - importableItems.length : 0;
-  const approve = () => {
-    if (!preview) return;
-    const addedItems = importableItems;
-    const usedGroups = new Set(addedItems.flatMap(item => item.mixGroupId ? [key(item.mixGroupId)] : []));
-    const occupiedGroups = new Set(store.mixGroups.map(group => key(group.name)));
-    const groupNames = new Map<string, string>();
-    const groups = preview.groups.filter(group => usedGroups.has(key(group.name))).map(group => {
-      const original = group.name.trim();
-      let name = original;
-      let suffix = 2;
-      while (occupiedGroups.has(key(name))) name = `${original} (${suffix++})`;
-      occupiedGroups.add(key(name));
-      groupNames.set(key(original), name);
-      return { ...group, name };
-    });
-    const peptides: Peptide[] = addedItems.map(item => ({ ...item, id: crypto.randomUUID(), name: item.name.trim(), shortCode: item.shortCode || item.name.slice(0, 3), mixGroupId: item.mixGroupId ? groupNames.get(key(item.mixGroupId)) ?? item.mixGroupId : undefined, remainingMg: item.vialMg, notes: item.notes ?? "", archived: false, example: false }));
-    update(value => ({ ...value, peptides: [...value.peptides, ...peptides], mixGroups: [...value.mixGroups, ...groups] }));
-    setMessage(`${peptides.length} peptider importerades${duplicates ? `. ${duplicates} med samma namn fanns redan och hoppades över.` : "."}`); setPreview(null); setImportCode("");
+  const approve = async () => {
+    if (!preview || !importEnabled) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const imported = await importSchedule(importCode);
+      setMessage(`${imported} peptider importerades. Befintliga loggar ändrades inte.`);
+      setPreview(null); setImportCode("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Kunde inte importera schemat. Inget schema importerades.");
+    } finally { setBusy(false); }
   };
   const currentPeptides = store.peptides.filter(peptide => !peptide.archived && !peptide.example);
   const importCurrent = () => {
@@ -207,7 +192,7 @@ export function ScheduleSharing({ store, update, onBack }: { store: PeptimeStore
   const exportable = draft.items.some(item => item.name.trim()) && draft.items.filter(item => item.name.trim()).every(item => item.doseMcg > 0 && item.vialMg > 0 && item.waterMl > 0);
 
   return <><PageHeader eyebrow="Planera och dela" title="Scheman" action={<Button variant="ghost" size="icon" className="size-11 rounded-full" onClick={onBack}><ArrowLeft/></Button>}/>{error && <p className="mb-4 rounded-xl bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}{message && <p className="mb-4 rounded-xl bg-accent p-3 text-sm">{message}</p>}
-    <section className="mb-7"><h2 className="mb-3 text-lg font-semibold">Importera schema</h2><Surface className="p-4"><div className="flex gap-2"><Input className="h-12 uppercase" value={importCode} onChange={event => setImportCode(event.target.value.toUpperCase())} placeholder="Kod, t.ex. P7K3MX"/><Button className="h-12" disabled={busy || !importCode.trim()} onClick={lookup}>Visa</Button></div>{preview && <div className="mt-4 border-t pt-4"><p className="text-lg font-semibold">Importera {preview.name}?</p><p className="mt-1 text-sm text-muted-foreground">{preview.items.length} peptider{duplicates ? ` · ${duplicates} dubbletter hoppas över` : ""}</p><div className="mt-4 grid grid-cols-2 gap-2"><Button variant="outline" className="h-12" onClick={() => setPreview(null)}>Avbryt</Button><Button className="h-12" disabled={busy} onClick={approve}><Check/> Godkänn</Button></div></div>}</Surface></section>
+    <section className="mb-7"><h2 className="mb-3 text-lg font-semibold">Importera schema</h2><Surface className="p-4"><div className="flex gap-2"><Input className="h-12 uppercase" value={importCode} onChange={event => setImportCode(event.target.value.toUpperCase())} placeholder="Kod, t.ex. P7K3MX"/><Button className="h-12" disabled={busy || !importCode.trim()} onClick={lookup}>Visa</Button></div>{preview && <div className="mt-4 border-t pt-4"><p className="text-lg font-semibold">Importera {preview.name}?</p><p className="mt-1 text-sm text-muted-foreground">Alla {preview.items.length} peptider tas med. Matchande peptider uppdateras och arkiverade aktiveras. Dos, vial och BAC hämtas från schemat; gamla loggar ändras inte.</p><div className="mt-4 grid grid-cols-2 gap-2"><Button variant="outline" className="h-12" onClick={() => setPreview(null)}>Avbryt</Button><Button className="h-12" disabled={busy || !importEnabled} onClick={approve}><Check/> Godkänn</Button></div>{!importEnabled && <p className="mt-2 text-sm text-destructive">Kontosynk måste fungera innan import.</p>}</div>}</Surface></section>
     <section><h2 className="mb-3 text-lg font-semibold">Mina scheman</h2><div className="mb-3 grid grid-cols-[1fr_auto] gap-2"><select className="h-12 min-w-0 rounded-xl border bg-card px-3" value={saved.some(item => item.id === draft.id) ? draft.id : ""} onChange={event => { const item = saved.find(value => value.id === event.target.value); if (item) setDraft(structuredClone(item)); }}><option value="">Nytt schema</option>{saved.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><Button variant="outline" className="h-12" onClick={() => setDraft(emptySaved())}><Plus/> Nytt</Button></div><Button type="button" variant="outline" className="mb-5 h-12 w-full" disabled={!currentPeptides.length} onClick={importCurrent}>Importera från Peptider</Button><label className="text-sm font-medium">Namn<Input className="mt-1.5 h-12" value={draft.name} onChange={event => setDraft(value => ({ ...value, name: event.target.value }))} placeholder="Schemats namn"/></label>
       {draft.code && <Surface className="mt-4 flex items-center justify-between p-4"><div><p className="text-sm text-muted-foreground">Delningskod</p><strong className="font-mono text-xl tracking-wider">{draft.code}</strong></div><Button variant="outline" className="h-12" onClick={() => navigator.clipboard.writeText(draft.code).then(() => setMessage("Koden är kopierad."))}><Clipboard/> Kopiera</Button></Surface>}
       <div className="mt-5 space-y-4">{draft.items.map((item, index) => <Surface key={index} className="space-y-4 p-4"><div className="flex items-center justify-between"><strong>Peptid {index + 1}</strong><Button variant="ghost" size="icon" onClick={() => setDraft(value => ({ ...value, items: value.items.filter((_, position) => position !== index) }))}><Trash2/></Button></div><label className="text-sm font-medium">Namn<Input className="mt-1.5 h-12" value={item.name} onChange={event => setItem(index, { name: event.target.value })}/></label><div className="grid grid-cols-2 gap-3"><label className="text-sm">Dos (mcg)<Decimal value={item.doseMcg} onChange={doseMcg => setItem(index, { doseMcg })}/></label><label className="text-sm">Vial (mg)<Decimal value={item.vialMg} onChange={vialMg => setItem(index, { vialMg })}/></label><label className="text-sm">BAC-vatten (ml)<Decimal value={item.waterMl} onChange={waterMl => setItem(index, { waterMl })}/></label><label className="text-sm">Administrering<select className="mt-1.5 h-12 w-full rounded-xl border bg-card px-3" value={item.route} onChange={event => setItem(index, { route: event.target.value as Item["route"] })}><option value="subcutaneous">Subkutan</option><option value="intranasal">Intranasal</option><option value="oral">Oral</option><option value="topical">Topikal</option></select></label></div><DoseSummary item={item}/><label className="flex min-h-14 items-center justify-between rounded-2xl border border-border px-4"><span><span className="block text-sm font-medium">Tas fastande</span><span className="text-xs text-muted-foreground">Visas tydligt när dosen ska tas</span></span><Switch aria-label="Tas fastande" checked={item.fasted} onCheckedChange={fasted => setItem(index, { fasted })}/></label><label className="text-sm">Kort anteckning · valfritt<Input className="mt-1.5 h-12" maxLength={160} value={item.notes} onChange={event => setItem(index, { notes: event.target.value })} placeholder="Exempel: Tas före läggdags"/></label><label className="text-sm">Mixgrupp · valfritt<Input className="mt-1.5 h-12" value={item.mixGroupId ?? ""} onChange={event => setItem(index, { mixGroupId: event.target.value || undefined })}/></label><ScheduleEditor item={item} set={part => setItem(index, part)}/></Surface>)}</div>
