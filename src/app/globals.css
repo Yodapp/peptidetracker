@@ -50,5 +50,8 @@
     /* Installed app: no rubber-band bounce past the page edges. */
     html, body { overscroll-behavior: none; }
   }
+  /* Right-aligned date and time fields in iOS-style form rows. */
+  input.text-right::-webkit-date-and-time-value { text-align: right; }
+  input.text-right::-webkit-calendar-picker-indicator { display: none; }
   ::selection { background: color-mix(in srgb, var(--primary) 35%, transparent); }
 }

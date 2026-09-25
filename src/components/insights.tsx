@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, CalendarDays, ChevronRight, MapPin, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Activity, CalendarDays, ChevronRight, Flame, Heart, MapPin, Sparkles, Syringe } from "lucide-react";
 import { WellbeingInsights } from "@/components/wellbeing-insights";
-import { PageHeader, SegmentedControl } from "@/components/peptime-ui";
+import { ListRow, ListSection, PageHeader, SectionHeading, SegmentedControl } from "@/components/peptime-ui";
+import { isDueOn } from "@/lib/schedule";
 import { exposureGroups, hasDailyEntry, metricDefinitions, periodStart, topPatterns, type InsightPattern, type InsightPeriod } from "@/lib/insight-analysis";
 import { addDays, displayLogDate, logScheduledDate, stockholmDate } from "@/lib/log-day";
 import type { DailyTagId, DoseLog, Peptide, PeptimeStore } from "@/lib/types";
@@ -14,7 +14,7 @@ const tagLabels: Record<string, string> = { great_sleep: "Sov bra", high_energy:
 const formatNumber = (value: number) => new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 2 }).format(value);
 const massMcg = (log: DoseLog, value: number) => value * (log.unit === "mg" ? 1000 : 1);
 const dayOf = (log: DoseLog, store: PeptimeStore) => logScheduledDate(log, store.settings.dayBoundaryHour);
-const card = "rounded-[22px] border border-border/80 bg-card p-5 shadow-[0_1px_2px_rgba(0,0,0,.025)]";
+const card = "rounded-[18px] bg-card p-5";
 
 type BodySite = { name: string; side: "front" | "back"; x: number; y: number };
 const bodySites: BodySite[] = [
@@ -114,7 +114,7 @@ function Chart({ logs, store, color, period }: { logs: DoseLog[]; store: Peptime
   </div>;
 }
 
-export function PeptideInsights({ store, peptide, onBack }: { store: PeptimeStore; peptide: Peptide; onBack: () => void }) {
+export function PeptideInsights({ store, peptide, back }: { store: PeptimeStore; peptide: Peptide; back: { label: string; onClick: () => void } }) {
   const [period, setPeriod] = useState<InsightPeriod>(90);
   const logs = store.logs.filter(log => log.peptideId === peptide.id);
   const start = periodStart(stockholmDate(), period);
@@ -125,20 +125,20 @@ export function PeptideInsights({ store, peptide, onBack }: { store: PeptimeStor
   const usedSites = [...new Set(taken.map(log => log.site).filter(Boolean))];
   const color = colors[peptide.color] ?? colors.teal;
   return <>
-    <header className="mb-6 flex items-center gap-3 pt-8"><Button variant="ghost" size="icon" className="size-11 shrink-0 rounded-full" onClick={onBack} aria-label="Tillbaka"><ArrowLeft /></Button><div><p className="text-xs font-semibold text-primary">Peptidens historik</p><h1 className="mt-1 text-[32px] font-bold tracking-tight">{peptide.name}</h1></div></header>
+    <PageHeader title={peptide.name} subtitle="Historik och kurvor" back={back}/>
     <div className="mb-5"><SegmentedControl label="Tidsperiod" value={period} onChange={setPeriod} values={[{ value: 30, label: "30 dagar" }, { value: 90, label: "90 dagar" }, { value: 365, label: "1 år" }]}/></div>
-    <div className="mb-5 grid grid-cols-3 gap-2">{[["Tagna", String(taken.length)], ["Överhoppade", String(skipped)], ["Total dos", `${formatNumber(totalMcg / 1000)} mg`]].map(([label, value]) => <div key={label} className="rounded-2xl border border-border bg-card p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-2 text-lg font-semibold tabular-nums">{value}</p></div>)}</div>
+    <div className="mb-5 grid grid-cols-3 gap-2">{[["Tagna", String(taken.length)], ["Överhoppade", String(skipped)], ["Total dos", `${formatNumber(totalMcg / 1000)} mg`]].map(([label, value]) => <div key={label} className="rounded-[14px] bg-card p-3"><p className="text-[13px] text-muted-foreground">{label}</p><p className="mt-1 text-[22px] font-bold tabular-nums">{value}</p></div>)}</div>
     <WellbeingInsights store={store} period={period} peptideId={peptide.id}/>
-    <section className={`${card} mb-5`}><h2 className="mb-5 text-lg font-medium">Dos över tid</h2><Chart logs={logs} store={store} color={color} period={period}/></section>
-    <section className={`${card} mb-5`}><div className="mb-4 flex items-center gap-2"><MapPin className="size-4 text-primary" /><h2 className="text-lg font-medium">Injektionsställen</h2></div>{usedSites.length ? <BodyMap logs={taken} /> : <p className="text-sm text-muted-foreground">Inga injektionsställen har loggats för den här peptiden.</p>}</section>
-    <section className={card}><h2 className="mb-4 text-lg font-medium">Senaste loggarna</h2>{logs.length ? <div className="divide-y divide-border">{[...logs].sort((a, b) => b.takenAt.localeCompare(a.takenAt)).slice(0, 10).map(log => <div key={log.id} className="flex justify-between gap-3 py-3 text-sm"><span className="min-w-0 truncate">{log.status === "taken" ? `${formatNumber(log.actualDose)} ${log.unit}${log.site ? ` · ${log.site}` : ""}` : "Överhoppad"}</span><span className="shrink-0 text-xs text-muted-foreground">{displayLogDate(dayOf(log, store), { day: "numeric", month: "short" })}</span></div>)}</div> : <p className="text-sm text-muted-foreground">Ingen historik ännu.</p>}</section>
+    <section className={`${card} mb-5`}><h2 className="mb-5 text-[17px] font-semibold">Dos över tid</h2><Chart logs={logs} store={store} color={color} period={period}/></section>
+    <section className={`${card} mb-5`}><div className="mb-4 flex items-center gap-2"><MapPin className="size-4 text-primary" /><h2 className="text-[17px] font-semibold">Injektionsställen</h2></div>{usedSites.length ? <BodyMap logs={taken} /> : <p className="text-sm text-muted-foreground">Inga injektionsställen har loggats för den här peptiden.</p>}</section>
+    <section className={card}><h2 className="mb-4 text-[17px] font-semibold">Senaste loggarna</h2>{logs.length ? <div className="divide-y divide-border">{[...logs].sort((a, b) => b.takenAt.localeCompare(a.takenAt)).slice(0, 10).map(log => <div key={log.id} className="flex justify-between gap-3 py-3 text-sm"><span className="min-w-0 truncate">{log.status === "taken" ? `${formatNumber(log.actualDose)} ${log.unit}${log.site ? ` · ${log.site}` : ""}` : "Överhoppad"}</span><span className="shrink-0 text-xs text-muted-foreground">{displayLogDate(dayOf(log, store), { day: "numeric", month: "short" })}</span></div>)}</div> : <p className="text-sm text-muted-foreground">Ingen historik ännu.</p>}</section>
   </>;
 }
 
 const patternNumber = (value: number) => value.toLocaleString("sv-SE", { maximumFractionDigits: 1 });
 const tagLabel = (tag: string) => tagLabels[tag] ?? tag;
 
-function PatternCards({ store, period, today }: { store: PeptimeStore; period: 30 | 90; today: string }) {
+function PatternCards({ store, period, today, onLogMood }: { store: PeptimeStore; period: 30 | 90; today: string; onLogMood: () => void }) {
   const patterns = topPatterns(store, period, today);
   const groups = exposureGroups(store, period, today);
   const noteDays = store.dailyNotes.filter(note => note.date >= periodStart(today, period) && note.date <= today && hasDailyEntry(note)).length;
@@ -149,7 +149,7 @@ function PatternCards({ store, period, today }: { store: PeptimeStore; period: 3
     return `${subject} ${pattern.window === "next_day" ? "dagen efter" : "på dosdagen"} ${pattern.exposure.label}`;
   };
   return <section className={`${card} mb-5`}>
-    <div className="mb-4 flex items-center gap-2"><Sparkles className="size-4 text-primary"/><div><h2 className="text-lg font-medium">Mönster i dina loggar</h2><p className="mt-0.5 text-xs text-muted-foreground">De största skillnaderna med tillräckligt underlag</p></div></div>
+    <div className="mb-4 flex items-center gap-2"><Sparkles className="size-4 text-primary"/><div><h2 className="text-[17px] font-semibold">Mönster i dina loggar</h2><p className="mt-0.5 text-xs text-muted-foreground">De största skillnaderna med tillräckligt underlag</p></div></div>
     {patterns.length > 0 ? <div className="divide-y divide-border">{patterns.map(pattern => {
       const comparison = pattern.comparison;
       return <div key={`${pattern.exposure.id}:${comparison.kind === "metric" ? comparison.metricKey : comparison.tag}:${pattern.window}`} className="py-4 first:pt-0 last:pb-0">
@@ -159,7 +159,11 @@ function PatternCards({ store, period, today }: { store: PeptimeStore; period: 3
           : <p className="mt-1 text-sm leading-6 text-muted-foreground">Loggat <strong className="font-semibold text-foreground">{comparison.exposedOccurrences} av {comparison.exposedCount} dagar</strong>, jämfört med {comparison.baselineOccurrences} av {comparison.baselineCount} andra dagar.</p>}
         {pattern.exposure.coDose && <p className="mt-1 text-xs leading-5 text-muted-foreground">{pattern.exposure.coDose.label} togs också på {pattern.exposure.coDose.count} av {pattern.exposure.coDose.total} dosdagar.</p>}
       </div>;
-    })}</div> : <div className="rounded-xl border border-dashed border-border p-4 text-sm leading-6 text-muted-foreground">{groups.length === 0 ? "Mönster visas när du har loggat doser och mående." : enoughForComparison ? "Inga större skillnader syns i den valda perioden." : "Fortsätt fylla i mående. En jämförelse visas när minst fyra dosdagar och fyra andra dagar har svar."}</div>}
+    })}</div> : enoughForComparison ? <p className="text-[15px] leading-6 text-muted-foreground">Inga större skillnader syns i den valda perioden.</p> : <div>
+      <div aria-hidden className="flex h-20 items-end gap-1.5 opacity-40">{[40, 65, 50, 80, 45, 70, 55, 90, 60, 75, 50, 85].map((height, index) => <span key={index} className="flex-1 rounded-t-md bg-primary/40" style={{ height: `${height}%` }}/>)}</div>
+      <p className="mt-4 text-[15px] leading-6 text-muted-foreground">Här visas hur du mår på dosdagar jämfört med andra dagar. Det behövs minst fyra dosdagar och fyra andra dagar med ifyllt mående.</p>
+      <button type="button" onClick={onLogMood} className="mt-4 h-11 w-full rounded-[12px] bg-primary text-[17px] font-semibold text-primary-foreground active:opacity-80">Fyll i dagens mående</button>
+    </div>}
   </section>;
 }
 
@@ -178,19 +182,19 @@ function ActivityCalendar({ store, period, today, onOpenCalendar }: { store: Pep
   const dayNote = selectedDate ? notes.get(selectedDate) : undefined;
 
   if (!logs.length && !days.some(date => hasDailyEntry(notes.get(date)))) return <section className={`${card} mb-5`}>
-    <div className="flex items-start gap-2"><CalendarDays className="mt-0.5 size-4 text-primary"/><div><h2 className="text-lg font-medium">Doser och mående per dag</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Din aktivitet visas här när du har loggat en dos eller dagens mående.</p></div></div>
+    <div className="flex items-start gap-2"><CalendarDays className="mt-0.5 size-4 text-primary"/><div><h2 className="text-[17px] font-semibold">Doser och mående per dag</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Din aktivitet visas här när du har loggat en dos eller dagens mående.</p></div></div>
     <div className="mt-4 rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">Ingen aktivitet under de senaste {period} dagarna.</div>
     <button type="button" onClick={onOpenCalendar} className="mt-4 flex min-h-12 w-full items-center justify-between border-t border-border pt-4 text-left text-sm font-medium"><span>Öppna hela kalendern</span><ChevronRight className="size-4 text-muted-foreground"/></button>
   </section>;
 
   return <section className={`${card} mb-5`}>
-    <div className="flex items-start gap-2"><CalendarDays className="mt-0.5 size-4 text-primary"/><div><h2 className="text-lg font-medium">Doser och mående per dag</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Mörkare ruta betyder fler tagna doser. Blå prick visar mående eller vald tagg.</p></div></div>
-    <div className="mt-5 grid grid-cols-7 gap-1 text-center font-mono text-[10px] text-muted-foreground">{"M T O T F L S".split(" ").map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
+    <div className="flex items-start gap-2"><CalendarDays className="mt-0.5 size-4 text-primary"/><div><h2 className="text-[17px] font-semibold">Doser och mående per dag</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Mörkare ruta betyder fler tagna doser. Blå prick visar mående eller vald tagg.</p></div></div>
+    <div className="mt-5 grid grid-cols-7 gap-1 text-center text-[11px] font-medium text-muted-foreground">{"M T O T F L S".split(" ").map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
     <div className="mt-2 grid grid-cols-7 gap-1.5">{cells.map((date, index) => {
       if (!date) return <span key={`empty-${index}`}/>;
       const count = logs.filter(log => log.status === "taken" && dayOf(log, store) === date).length;
       const hasMarker = selectedTag === "all" ? hasDailyEntry(notes.get(date)) : Boolean(notes.get(date)?.tags.includes(selectedTag));
-      return <button type="button" key={date} onClick={() => setSelectedDate(date)} aria-label={`${date}: ${count} tagna doser${hasMarker ? ", mående registrerat" : ""}`} className={`relative aspect-square min-h-9 rounded-lg border text-[11px] tabular-nums ${selectedDate === date ? "border-foreground" : "border-transparent"} ${count === 0 ? "bg-muted/70" : count === 1 ? "bg-primary/45" : count === 2 ? "bg-primary/70 text-primary-foreground" : "bg-primary text-primary-foreground"}`}>{Number(date.slice(-2))}{hasMarker && <span className="absolute bottom-1 right-1 size-1.5 rounded-full bg-[#7f9fca] ring-1 ring-card"/>}</button>;
+      return <button type="button" key={date} onClick={() => setSelectedDate(date)} aria-label={`${date}: ${count} tagna doser${hasMarker ? ", mående registrerat" : ""}`} className={`relative aspect-square min-h-9 rounded-lg border text-[11px] tabular-nums ${selectedDate === date ? "border-foreground" : "border-transparent"} ${count === 0 ? "bg-secondary/45 text-muted-foreground/70" : count === 1 ? "bg-primary/40 font-medium" : count === 2 ? "bg-primary/70 font-medium text-primary-foreground" : "bg-primary font-semibold text-primary-foreground"}`}>{Number(date.slice(-2))}{hasMarker && <span className="absolute bottom-1 right-1 size-1.5 rounded-full bg-[#7f9fca] ring-1 ring-card"/>}</button>;
     })}</div>
 
     {tags.length > 0 && <div className="mt-4 flex flex-wrap gap-1.5"><button type="button" onClick={() => setSelectedTag("all")} aria-pressed={selectedTag === "all"} className={`min-h-9 rounded-full border px-2.5 text-xs ${selectedTag === "all" ? "border-primary bg-accent text-accent-foreground" : "border-border"}`}>Allt mående</button>{tags.map(tag => <button type="button" key={tag.id} onClick={() => setSelectedTag(tag.id)} aria-pressed={selectedTag === tag.id} className={`min-h-9 rounded-full border px-2.5 text-xs ${selectedTag === tag.id ? "border-primary bg-accent text-accent-foreground" : "border-border"}`}>{tagLabel(tag.id)} · {tag.count}</button>)}</div>}
@@ -206,29 +210,91 @@ function ActivityCalendar({ store, period, today, onOpenCalendar }: { store: Pep
   </section>;
 }
 
-export function InsightsView({ store, onOpenPeptide, onOpenCalendar }: { store: PeptimeStore; onOpenPeptide: (id: string) => void; onOpenCalendar: () => void }) {
-  const [period, setPeriod] = useState<30 | 90>(90);
+function takenLogsBetween(store: PeptimeStore, from: string, to: string) {
+  return store.logs.filter(log => log.status === "taken" && dayOf(log, store) >= from && dayOf(log, store) <= to);
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  const max = Math.max(1, ...values);
+  const step = 100 / Math.max(1, values.length - 1);
+  const path = values.map((value, index) => `${index ? "L" : "M"}${(index * step).toFixed(1)},${(30 - value / max * 26).toFixed(1)}`).join(" ");
+  return <svg viewBox="0 0 100 32" preserveAspectRatio="none" className="mt-2 h-8 w-full overflow-visible text-primary" aria-hidden><path d={`${path} L100,32 L0,32 Z`} fill="currentColor" opacity=".12"/><path d={path} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round"/></svg>;
+}
+
+function StatTile({ label, value, bins, previous, current }: { label: string; value: string; bins: number[]; previous: number; current: number }) {
+  const delta = current - previous;
+  return <div className="rounded-[18px] bg-card p-4">
+    <p className="text-[13px] font-medium text-muted-foreground">{label}</p>
+    <p className="mt-0.5 text-[28px] font-bold leading-tight tracking-tight tabular-nums">{value}</p>
+    <Sparkline values={bins}/>
+    <p className="mt-1 text-[13px] text-muted-foreground">{previous === 0 && current === 0 ? "Ingen data än" : delta === 0 ? "Som förra perioden" : `${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)} mot förra perioden`}</p>
+  </div>;
+}
+
+function Highlight({ icon, label, tone, children }: { icon: React.ReactNode; label: string; tone: string; children: React.ReactNode }) {
+  return <div className="rounded-[18px] bg-card p-4"><p className={`flex items-center gap-1.5 text-[13px] font-semibold ${tone}`}>{icon}{label}</p><p className="mt-1.5 text-[17px] font-semibold leading-[22px]">{children}</p></div>;
+}
+
+export function InsightsView({ store, onOpenPeptide, onOpenCalendar, onLogMood, headerAction }: { store: PeptimeStore; onOpenPeptide: (id: string) => void; onOpenCalendar: () => void; onLogMood: () => void; headerAction: React.ReactNode }) {
+  const [period, setPeriod] = useState<30 | 90>(30);
   const today = stockholmDate();
   const start = periodStart(today, period);
+  const previousStart = addDays(start, -period);
+  const previousEnd = addDays(start, -1);
   const logs = store.logs.filter(log => dayOf(log, store) >= start && dayOf(log, store) <= today);
   const taken = logs.filter(log => log.status === "taken");
   const skipped = logs.length - taken.length;
   const loggedDays = new Set(taken.map(log => dayOf(log, store)));
-  const noteDays = store.dailyNotes.filter(note => note.date >= start && note.date <= today && hasDailyEntry(note)).length;
+  const noteDates = (from: string, to: string) => store.dailyNotes.filter(note => note.date >= from && note.date <= to && hasDailyEntry(note));
+  const noteDays = noteDates(start, today).length;
   const siteLogs = taken.filter(log => log.site);
+  const previousTaken = takenLogsBetween(store, previousStart, previousEnd);
+  const previousLogs = store.logs.filter(log => dayOf(log, store) >= previousStart && dayOf(log, store) <= previousEnd);
+  const binCount = 10;
+  const binOf = (date: string) => Math.min(binCount - 1, Math.floor((Date.parse(`${date}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / 86400000 / (period / binCount)));
+  const bins = (dates: string[]) => { const values = Array(binCount).fill(0); dates.forEach(date => { if (date >= start && date <= today) values[binOf(date)] += 1; }); return values; };
+
+  // Planned doses up to yesterday, counted from the first logged day so a new user is not shown as missing doses.
+  const firstLogDate = store.logs.map(log => dayOf(log, store)).sort()[0];
+  const yesterday = addDays(today, -1);
+  const adherenceStart = firstLogDate && firstLogDate > start ? firstLogDate : start;
+  let planned = 0;
+  if (firstLogDate) for (let date = adherenceStart; date <= yesterday; date = addDays(date, 1)) planned += store.peptides.filter(peptide => isDueOn(peptide, store, date)).length;
+  const takenBeforeToday = taken.filter(log => dayOf(log, store) >= adherenceStart && dayOf(log, store) <= yesterday).length;
+  const takenDates = new Set(store.logs.filter(log => log.status === "taken").map(log => dayOf(log, store)));
+  let streak = 0;
+  for (let date = takenDates.has(today) ? today : yesterday; takenDates.has(date); date = addDays(date, -1)) streak += 1;
+  const moodLastWeek = noteDates(addDays(today, -6), today).length;
+  const pattern = topPatterns(store, period, today, 1)[0];
+
   return <>
-    <PageHeader eyebrow="Din egen data" title="Insikter" subtitle="Mönster i det du har loggat"/>
-    <div className="mb-5"><SegmentedControl label="Tidsperiod" value={period} onChange={setPeriod} values={[{ value: 30, label: "30 dagar" }, { value: 90, label: "90 dagar" }]}/></div>
-    <div className="mb-5 grid grid-cols-2 gap-2">{[["Tagna doser", String(taken.length)], ["Dosdagar", String(loggedDays.size)], ["Måendedagar", `${noteDays} av ${period}`], ["Överhoppade", String(skipped)]].map(([label, value]) => <div key={label} className="rounded-2xl border border-border bg-card p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-2 text-xl font-semibold tabular-nums">{value}</p></div>)}</div>
-    <PatternCards store={store} period={period} today={today}/>
+    <PageHeader title="Insikter" action={headerAction}/>
+    <div className="mb-6"><SegmentedControl label="Tidsperiod" value={period} onChange={setPeriod} values={[{ value: 30, label: "30 dagar" }, { value: 90, label: "90 dagar" }]}/></div>
+    <SectionHeading title="Höjdpunkter"/>
+    <div className="mb-7 space-y-2.5">
+      {planned > 0 && <Highlight icon={<Syringe className="size-4"/>} label="Doser" tone="text-primary">Du tog {Math.min(takenBeforeToday, planned)} av {planned} planerade doser {firstLogDate && firstLogDate > start ? "sedan du började logga" : `de senaste ${period} dagarna`}.</Highlight>}
+      {streak > 1 && <Highlight icon={<Flame className="size-4"/>} label="I rad" tone="text-orange-600 dark:text-orange-400">Du har loggat doser {streak} dagar i rad.</Highlight>}
+      {pattern && <Highlight icon={<Sparkles className="size-4"/>} label="Mönster" tone="text-violet-600 dark:text-violet-400">{pattern.comparison.kind === "metric"
+        ? `${metricDefinitions.find(metric => pattern.comparison.kind === "metric" && metric.key === pattern.comparison.metricKey)!.label} ${pattern.window === "next_day" ? "dagen efter" : "på dagar med"} ${pattern.exposure.label}: ${patternNumber(pattern.comparison.exposedAverage!)} mot ${patternNumber(pattern.comparison.baselineAverage!)} andra dagar.`
+        : `${tagLabel(pattern.comparison.tag)} ${pattern.window === "next_day" ? "dagen efter" : "på dagar med"} ${pattern.exposure.label}: ${pattern.comparison.exposedOccurrences} av ${pattern.comparison.exposedCount} dagar.`}</Highlight>}
+      <Highlight icon={<Heart className="size-4"/>} label="Mående" tone="text-rose-500">{moodLastWeek === 0 ? "Du har inte fyllt i mående den senaste veckan." : `Du fyllde i mående ${moodLastWeek} av de senaste 7 dagarna.`}{moodLastWeek < 7 && <button type="button" onClick={onLogMood} className="mt-2 block text-[15px] font-semibold text-primary">Fyll i idag</button>}</Highlight>
+    </div>
+    <SectionHeading title="Översikt" detail={`Senaste ${period} dagarna`}/>
+    <div className="mb-7 grid grid-cols-2 gap-2.5">
+      <StatTile label="Tagna doser" value={String(taken.length)} bins={bins(taken.map(log => dayOf(log, store)))} current={taken.length} previous={previousTaken.length}/>
+      <StatTile label="Dosdagar" value={String(loggedDays.size)} bins={bins([...loggedDays])} current={loggedDays.size} previous={new Set(previousTaken.map(log => dayOf(log, store))).size}/>
+      <StatTile label="Dagar med mående" value={String(noteDays)} bins={bins(noteDates(start, today).map(note => note.date))} current={noteDays} previous={noteDates(previousStart, previousEnd).length}/>
+      <StatTile label="Överhoppade" value={String(skipped)} bins={bins(logs.filter(log => log.status === "skipped").map(log => dayOf(log, store)))} current={skipped} previous={previousLogs.filter(log => log.status === "skipped").length}/>
+    </div>
+    <PatternCards store={store} period={period} today={today} onLogMood={onLogMood}/>
     <WellbeingInsights store={store} period={period}/>
     <ActivityCalendar store={store} period={period} today={today} onOpenCalendar={onOpenCalendar}/>
-    <section className={`${card} mb-5`}><div className="mb-4 flex items-center gap-2"><MapPin className="size-4 text-primary"/><div><h2 className="text-lg font-medium">Injektionsställen</h2><p className="mt-0.5 text-xs text-muted-foreground">Antal injektionstillfällen under {period} dagar</p></div></div>{siteLogs.length ? <BodyMap logs={siteLogs}/> : <p className="text-sm text-muted-foreground">Inga injektionsställen har loggats under perioden.</p>}</section>
-    <section className={card}><h2 className="mb-3 text-lg font-medium">Peptider</h2><div className="divide-y divide-border">{store.peptides.map(peptide => {
+    <section className={`${card} mb-7`}><div className="mb-4 flex items-center gap-2"><MapPin className="size-4 text-primary"/><div><h2 className="text-[17px] font-semibold">Injektionsställen</h2><p className="mt-0.5 text-[13px] text-muted-foreground">Antal injektioner under {period} dagar</p></div></div>{siteLogs.length ? <BodyMap logs={siteLogs}/> : <p className="text-[15px] text-muted-foreground">Välj injektionsplats när du tar en dos så syns den här.</p>}</section>
+    <ListSection title="Per peptid">{store.peptides.length === 0 ? <ListRow title="Inga peptider ännu"/> : store.peptides.map(peptide => {
       const peptideLogs = taken.filter(log => log.peptideId === peptide.id);
       const doseDays = new Set(peptideLogs.map(log => dayOf(log, store))).size;
       const latest = [...peptideLogs].sort((a, b) => b.takenAt.localeCompare(a.takenAt))[0];
-      return <button type="button" key={peptide.id} onClick={() => onOpenPeptide(peptide.id)} className="flex min-h-16 w-full items-center justify-between gap-3 text-left"><span className="min-w-0"><span className="block truncate text-sm font-medium">{peptide.name}{peptide.archived ? " · arkiverad" : ""}</span><span className="mt-1 block text-xs text-muted-foreground">{latest ? `${doseDays} ${doseDays === 1 ? "dosdag" : "dosdagar"} · senast ${displayLogDate(dayOf(latest, store), { day: "numeric", month: "short" })}` : "Ingen dos under perioden"}</span></span><ChevronRight className="size-4 shrink-0 text-muted-foreground"/></button>;
-    })}</div>{store.peptides.length === 0 && <p className="text-sm text-muted-foreground">Lägg till en peptid för att se dess historik.</p>}</section>
+      return <ListRow key={peptide.id} icon={<Activity/>} iconClassName="bg-primary" title={`${peptide.name}${peptide.archived ? " · arkiverad" : ""}`} subtitle={latest ? `${doseDays} ${doseDays === 1 ? "dosdag" : "dosdagar"} · senast ${displayLogDate(dayOf(latest, store), { day: "numeric", month: "short" })}` : "Ingen dos under perioden"} chevron onClick={() => onOpenPeptide(peptide.id)}/>;
+    })}</ListSection>
   </>;
 }

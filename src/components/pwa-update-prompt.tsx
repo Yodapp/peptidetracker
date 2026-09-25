@@ -56,6 +56,6 @@ export function PwaUpdatePrompt() {
   return <button
     type="button"
     onClick={() => window.location.reload()}
-    className="fixed inset-x-5 bottom-[calc(88px+env(safe-area-inset-bottom))] z-50 mx-auto min-h-12 max-w-[460px] rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-xl"
+    className="fixed inset-x-5 bottom-[calc(68px+env(safe-area-inset-bottom))] z-50 mx-auto min-h-12 max-w-[460px] rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-xl"
   >Ny version · Ladda om</button>;
 }

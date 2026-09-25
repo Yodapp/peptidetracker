@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Bell, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Surface } from "@/components/peptime-ui";
+import { IconTile, Surface } from "@/components/peptime-ui";
 import { registerServiceWorker } from "@/lib/service-worker";
 
 type Preferences = { enabled: boolean; lead_minutes: 0 | 10 | 15; follow_up_enabled: boolean; daily_summary_enabled: boolean; daily_summary_time: string };
@@ -127,9 +127,9 @@ export function ReminderSettings({ available }: { available: boolean }) {
   };
 
   const status = loading ? "Kontrollerar…" : !available ? "Logga in på kontot först" : !configured ? "Servern är inte konfigurerad" : active ? "Aktiva på den här telefonen" : permission === "denied" ? "Blockerade i telefonens inställningar" : preferences.enabled ? "Aktivera på den här telefonen" : "Avstängda";
-  return <Surface className="overflow-hidden">
+  return <Surface className="overflow-hidden rounded-[14px]">
     <div className="flex min-h-16 items-center justify-between gap-3 p-4">
-      <div className="flex min-w-0 gap-3"><Bell className="mt-1 size-5 shrink-0 text-primary"/><div><p className="font-medium">Påminnelser</p><p className="mt-0.5 text-xs text-muted-foreground">{status}</p></div></div>
+      <div className="flex min-w-0 items-center gap-3"><IconTile className="bg-red-500"><Bell/></IconTile><div><p className="text-[17px]">Påminnelser</p><p className="mt-0.5 text-[13px] text-muted-foreground">{status}</p></div></div>
       <Switch aria-label="Aktivera påminnelser" checked={active} disabled={loading || busy || !available || !configured} onCheckedChange={checked => void save({ ...preferences, enabled: checked })}/>
     </div>
     {ios && !installed && <div className="border-t border-border bg-muted/40 p-4 text-sm leading-6"><p className="font-medium">Lägg till Peptime på hemskärmen</p><p className="mt-1 text-muted-foreground">Tryck på Dela i webbläsaren, välj ”Lägg till på hemskärmen” och öppna sedan Peptime från den nya ikonen. Då kan du slå på notiser.</p></div>}

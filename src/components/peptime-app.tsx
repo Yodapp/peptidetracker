@@ -2,15 +2,15 @@
 
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  Archive, BarChart3, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight,
-  FlaskConical, History, House, MoreHorizontal, Pencil, Plus, RotateCcw,
-  Search, Settings, ShieldCheck, ShoppingCart, Sparkles, Syringe, Trash2, TriangleAlert, X,
+  Archive, BarChart3, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Flame,
+  FlaskConical, Heart, History, House, Plus, RotateCcw,
+  Search, Share2, ShieldCheck, ShoppingCart, Sparkles, Syringe, TriangleAlert, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PurchasePlanner } from "@/components/purchase-planner";
 import { ScheduleSharing } from "@/components/schedule-sharing";
 import { InsightsView, PeptideInsights } from "@/components/insights";
-import { PageHeader, SectionHeading, Surface as Card } from "@/components/peptime-ui";
+import { HeaderButton, IconTile, ListRow, ListSection, PageHeader, ProfileButton, ProgressRing, SectionHeading, SegmentedControl, SheetBar, Surface as Card, Toast } from "@/components/peptime-ui";
 import { SettingsView } from "@/components/settings-view";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,7 +24,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { loadRemoteStore, normalizeStoreIds, rebaseStore, saveRemoteStore } from "@/lib/supabase/store";
 import { readLocalRecovery } from "@/lib/local-recovery";
 import { missingRecoveryCounts, storeFromSyncEntities, visibleRecoveryStore, type RecoveryCounts } from "@/lib/recovery-store";
-import { clampInventoryMg, deleteDoseLog, replaceDoseLog } from "@/lib/inventory";
+import { clampInventoryMg, deleteDoseLog, replaceDoseLog, restoreDoseLog } from "@/lib/inventory";
 import { applyThemeMode } from "@/lib/theme";
 
 const STORAGE_KEY = "peptime-demo-v1";
@@ -57,12 +57,12 @@ const dailyTags: { id: DailyTagId; label: string }[] = [
 ];
 const legacyTagLabels: Record<string, string> = { great_sleep: "Sov bra", high_energy: "Hög energi" };
 const tagLabel = (tag: string) => dailyTags.find(value => value.id === tag)?.label ?? legacyTagLabels[tag] ?? tag;
-const wellbeingScales: { key: WellbeingMetric; title: string; low: string; high: string; description: string }[] = [
-  { key: "sleepQuality", title: "Sömnkvalitet", low: "Mycket dålig", high: "Mycket bra", description: "Natten till idag" },
-  { key: "brainFatigue", title: "Hjärntrötthet", low: "Ingen", high: "Extrem", description: "Hur mentalt trött du känt dig idag" },
-  { key: "physicalFatigue", title: "Fysisk trötthet", low: "Ingen", high: "Extrem", description: "Hur trött kroppen känts idag" },
-  { key: "painLevel", title: "Värk", low: "Ingen värk", high: "Mycket värk", description: "Hur mycket värk du känt idag" },
-  { key: "activityLevel", title: "Aktivitetsnivå", low: "Mycket låg", high: "Mycket hög", description: "Dagens rörelse och träning" },
+const wellbeingScales: { key: WellbeingMetric; title: string; short: string; low: string; high: string; description: string }[] = [
+  { key: "sleepQuality", title: "Sömnkvalitet", short: "Sömn", low: "Mycket dålig", high: "Mycket bra", description: "Natten till idag" },
+  { key: "brainFatigue", title: "Hjärntrötthet", short: "Hjärntrött", low: "Ingen", high: "Extrem", description: "Hur mentalt trött du känt dig idag" },
+  { key: "physicalFatigue", title: "Fysisk trötthet", short: "Kroppstrött", low: "Ingen", high: "Extrem", description: "Hur trött kroppen känts idag" },
+  { key: "painLevel", title: "Värk", short: "Värk", low: "Ingen värk", high: "Mycket värk", description: "Hur mycket värk du känt idag" },
+  { key: "activityLevel", title: "Aktivitetsnivå", short: "Aktivitet", low: "Mycket låg", high: "Mycket hög", description: "Dagens rörelse och träning" },
 ];
 
 function hasWellbeingData(note?: DailyNote) {
@@ -70,7 +70,7 @@ function hasWellbeingData(note?: DailyNote) {
 }
 
 function WellbeingScale({ scale, value, onChange }: { scale: typeof wellbeingScales[number]; value?: number; onChange: (value: number) => void }) {
-  return <fieldset className="rounded-2xl bg-muted/70 p-4"><legend className="sr-only">{scale.title}</legend><div className="mb-3"><p className="text-[15px] font-semibold">{scale.title}</p><p className="mt-0.5 text-[13px] text-muted-foreground">{scale.description}</p></div><div className="grid grid-cols-5 gap-2">{[1,2,3,4,5].map(step => <button type="button" key={step} aria-label={`${scale.title}: ${step} av 5`} aria-pressed={value === step} onClick={() => { haptic(); onChange(step); }} className={`grid min-h-11 place-items-center rounded-xl text-[15px] font-semibold transition-colors ${value === step ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground shadow-[0_1px_2px_rgba(0,0,0,.05)]"}`}>{step}</button>)}</div><div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>{scale.low}</span><span>{scale.high}</span></div></fieldset>;
+  return <fieldset className="rounded-[14px] bg-card p-4"><legend className="sr-only">{scale.title}</legend><div className="mb-3"><p className="text-[15px] font-semibold">{scale.title}</p><p className="mt-0.5 text-[13px] text-muted-foreground">{scale.description}</p></div><div className="grid grid-cols-5 gap-2">{[1,2,3,4,5].map(step => <button type="button" key={step} aria-label={`${scale.title}: ${step} av 5`} aria-pressed={value === step} onClick={() => { haptic(); onChange(step); }} className={`grid min-h-11 place-items-center rounded-[12px] text-[17px] font-semibold transition-colors ${value === step ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground/75"}`}>{step}</button>)}</div><div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>{scale.low}</span><span>{scale.high}</span></div></fieldset>;
 }
 
 function vialDaysLeft(peptide: Peptide) {
@@ -101,15 +101,6 @@ function consecutiveLoggedDays(logs: DoseLog[], today: string, dayBoundaryHour: 
   let count = 0;
   while (dates.has(date)) { count += 1; date = previousDate(date); }
   return count;
-}
-
-function ChemicalBadge({ items }: { items: Peptide[] }) {
-  const color = compoundColors[items[0]?.color] ?? compoundColors.teal;
-  return <div style={{ borderColor: `${color}55`, backgroundColor: `${color}18`, color }} className="grid size-11 shrink-0 place-items-center rounded-xl border font-mono text-[11px] font-semibold tracking-[.06em]">{items.length > 1 ? "MIX" : peptideCode(items[0])}</div>;
-}
-
-function FastedBadge() {
-  return <span className="inline-flex min-h-7 items-center rounded-full border border-amber-700/20 bg-amber-500/10 px-2.5 text-sm font-medium text-amber-800 dark:border-amber-300/20 dark:text-amber-200">Fastande</span>;
 }
 
 function SyringeDrawBar({ items }: { items: Peptide[] }) {
@@ -425,11 +416,10 @@ function useStore() {
   return [store, setStore, ready, syncState, retrySync, syncError, activeUserId, recoveryActive, recoveryCounts, restoreMissingRecords, importSharedSchedule] as const;
 }
 
-function BottomNav({ view, setView }: { view: string; setView: (view: string) => void }) {
-  const items = [[House, "today", "Idag"], [History, "log", "Logg"], [FlaskConical, "peptides", "Peptider"], [BarChart3, "insights", "Insikter"], [Settings, "settings", "Inställningar"]] as const;
-  const activeView = view === "planner" || view === "schedule-sharing" || view === "peptide-insights" ? "peptides" : view;
-  return <nav aria-label="Huvudnavigering" className="fixed inset-x-0 bottom-0 z-30 mx-auto flex h-[calc(76px+env(safe-area-inset-bottom))] max-w-[500px] items-start justify-around border-t border-border/70 bg-background/88 px-2 pt-2 backdrop-blur-2xl">
-    {items.map(([Icon, key, label]) => <button key={key} aria-current={activeView === key ? "page" : undefined} onClick={() => setView(key)} className={`flex min-h-14 min-w-[56px] flex-col items-center justify-center gap-1 rounded-xl text-[12px] font-medium transition-colors ${activeView === key ? "text-primary" : "text-muted-foreground"}`}><Icon className="size-[22px]" strokeWidth={activeView === key ? 2.4 : 1.8} />{label}</button>)}
+function BottomNav({ tab, onSelect }: { tab: Tab; onSelect: (tab: Tab) => void }) {
+  const items = [[House, "today"], [History, "log"], [FlaskConical, "peptides"], [BarChart3, "insights"]] as const;
+  return <nav aria-label="Huvudnavigering" className="fixed inset-x-0 bottom-0 z-30 border-t border-border/70 bg-background/85 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl backdrop-saturate-150">
+    <div className="mx-auto grid h-14 max-w-[500px] grid-cols-4">{items.map(([Icon, key]) => <button type="button" key={key} aria-current={tab === key ? "page" : undefined} onClick={() => onSelect(key)} className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors active:opacity-60 ${tab === key ? "text-primary" : "text-muted-foreground"}`}><Icon className="size-6" strokeWidth={tab === key ? 2.3 : 1.8}/>{tabLabels[key]}</button>)}</div>
   </nav>;
 }
 
@@ -449,111 +439,324 @@ function Onboarding({ store, update }: { store: PeptimeStore; update: React.Disp
   </div></div></div>;
 }
 
-function TodayView({ store, update, openCalendar }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; openCalendar: () => void }) {
-  type LogTarget = { items: Peptide[]; scheduledDate: string; carryover: boolean };
+type LogTarget = { items: Peptide[]; scheduledDate: string; carryover: boolean };
+type DoneRow = { key: string; names: string; status: DoseLog["status"]; takenAt: string; iu: number; site?: string; slot: Slot; logIds: string[] };
+const slotOrder: Slot[] = ["morning", "lunch", "evening", "as_needed"];
+const clock = (iso: string) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+function minutesBetween(from: string, to: string) {
+  const [fromHour, fromMinute] = from.split(":").map(Number);
+  const [toHour, toMinute] = to.split(":").map(Number);
+  return (toHour * 60 + toMinute) - (fromHour * 60 + fromMinute);
+}
+function lateLabel(minutes: number) {
+  return minutes < 60 ? `${minutes} min sen` : `${Math.floor(minutes / 60)} h ${minutes % 60 ? `${minutes % 60} min ` : ""}sen`;
+}
+
+function DoseBadge({ items, size = "md" }: { items: Peptide[]; size?: "md" | "lg" }) {
+  const color = compoundColors[items[0]?.color] ?? compoundColors.teal;
+  return <span style={{ backgroundColor: `${color}26`, color }} className={`grid shrink-0 place-items-center rounded-full font-semibold tracking-[-.01em] ${size === "lg" ? "size-14 text-[17px]" : "size-11 text-[13px]"}`}>{items.length > 1 ? <Syringe className={size === "lg" ? "size-6" : "size-5"}/> : peptideCode(items[0])}</span>;
+}
+
+function WellbeingSheet({ open, onClose, store, noteEntry, saveNote, removeCustomTag }: { open: boolean; onClose: () => void; store: PeptimeStore; noteEntry: DailyNote; saveNote: (changes: Partial<DailyNote>) => void; removeCustomTag: (tag: string) => void }) {
+  const [customTag, setCustomTag] = useState("");
+  const toggleTag = (tag: DailyTagId) => { haptic(); saveNote({ tags: noteEntry.tags.includes(tag) ? noteEntry.tags.filter(value => value !== tag) : [...noteEntry.tags, tag] }); };
+  const addCustomTag = () => { const value = customTag.trim().slice(0, 40); if (!value) return; saveNote({ tags: [...new Set([...noteEntry.tags, value])] }); setCustomTag(""); };
+  const chip = (selected: boolean) => `min-h-10 px-3.5 text-[15px] transition-colors ${selected ? "bg-primary text-primary-foreground" : "bg-card text-foreground/80"}`;
+  return <Dialog open={open} onOpenChange={value => { if (!value) onClose(); }}>
+    <DialogContent showCloseButton={false} className="max-h-[92dvh] overflow-y-auto bg-background">
+      <SheetBar title="Dagens mående" onDone={onClose}/>
+      <DialogHeader className="sr-only"><DialogTitle>Dagens mående</DialogTitle><DialogDescription>Sparas automatiskt</DialogDescription></DialogHeader>
+      <div className="space-y-3">{wellbeingScales.map(scale => <WellbeingScale key={scale.key} scale={scale} value={noteEntry[scale.key]} onChange={value => saveNote({ [scale.key]: value })}/>)}</div>
+      <div><p className="mb-2 text-[15px] font-semibold">Hur har dagen känts?</p><div className="flex flex-wrap gap-2">{dailyTags.map(tag => <button type="button" key={tag.id} aria-pressed={noteEntry.tags.includes(tag.id)} onClick={() => toggleTag(tag.id)} className={`rounded-full ${chip(noteEntry.tags.includes(tag.id))}`}>{tag.label}</button>)}{store.settings.customDailyTags.map(tag => <span key={tag} className="inline-flex overflow-hidden rounded-full"><button type="button" aria-pressed={noteEntry.tags.includes(tag)} onClick={() => toggleTag(tag)} className={chip(noteEntry.tags.includes(tag))}>{tag}</button><button type="button" onClick={() => removeCustomTag(tag)} aria-label={`Ta bort taggen ${tag}`} className="min-h-10 border-l border-border bg-card px-2.5 text-muted-foreground"><X className="size-3.5"/></button></span>)}</div>
+        <div className="mt-3 flex gap-2"><Input value={customTag} onChange={event => setCustomTag(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addCustomTag(); } }} maxLength={40} placeholder="Egen tagg" className="border-0 bg-card"/><Button type="button" variant="secondary" className="shrink-0" onClick={addCustomTag} disabled={!customTag.trim()}><Plus/> Lägg till</Button></div></div>
+      <label className="block text-[15px] font-semibold">Anteckning <span className="font-normal text-muted-foreground">· valfritt</span><Textarea value={noteEntry.note} onChange={event => saveNote({ note: event.target.value })} placeholder="Något mer du vill komma ihåg?" className="mt-2 resize-none border-0 bg-card font-normal"/></label>
+      <p className="text-center text-[13px] text-muted-foreground">Sparas automatiskt</p>
+    </DialogContent>
+  </Dialog>;
+}
+
+function TodayView({ store, update, openCalendar, headerAction, openCheckinInitially, onCheckinClosed }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; openCalendar: () => void; headerAction: React.ReactNode; openCheckinInitially: boolean; onCheckinClosed: () => void }) {
   const today = stockholmDate();
   const yesterday = previousDate(today);
+  const boundary = store.settings.dayBoundaryHour;
   const [siteSelections, setSiteSelections] = useState<Record<string, string>>({});
   const [adjustTarget, setAdjustTarget] = useState<LogTarget | null>(null);
   const [adjustDoses, setAdjustDoses] = useState<Record<string, number>>({});
-  const [undoIds, setUndoIds] = useState<string[]>([]);
-  const [checkinOpen, setCheckinOpen] = useState<boolean | null>(null);
+  const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
+  const [toast, setToast] = useState<{ message: string; logIds: string[] } | null>(null);
+  useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 8000); return () => window.clearTimeout(timer); }, [toast]);
+  const [checkinOpen, setCheckinOpen] = useState(openCheckinInitially);
   const [checkinDeferredDate, setCheckinDeferredDate] = useState<string | null>(() => {
     try { return typeof window === "undefined" ? null : window.sessionStorage.getItem(CHECKIN_LATER_KEY); }
     catch { return null; }
   });
-  const [customTag, setCustomTag] = useState("");
-  const checkinRef = useRef<HTMLElement>(null);
   const noteEntry: DailyNote = store.dailyNotes.find(v => v.date === today) ?? { date: today, note: "", tags: [] };
-  const note = noteEntry.note;
-  const loggedIdsFor = (date:string) => new Set(store.logs.filter(log => logScheduledDate(log,store.settings.dayBoundaryHour)===date).map(log=>log.peptideId));
-  const loggedToday = loggedIdsFor(today);
-  const done = store.peptides.filter(p => !p.archived && loggedToday.has(p.id));
-  const streak = consecutiveLoggedDays(store.logs, today, store.settings.dayBoundaryHour);
-  const groupsFor = (date:string,carryover:boolean) => {
-    const loggedIds=loggedIdsFor(date);
-    const due=store.peptides.filter(peptide=>isDueOn(peptide,store,date)&&!loggedIds.has(peptide.id));
+  const loggedIdsFor = (date: string) => new Set(store.logs.filter(log => logScheduledDate(log, boundary) === date).map(log => log.peptideId));
+  const streak = consecutiveLoggedDays(store.logs, today, boundary);
+  const groupsFor = (date: string, carryover: boolean): LogTarget[] => {
+    const loggedIds = loggedIdsFor(date);
+    const due = store.peptides.filter(peptide => isDueOn(peptide, store, date) && !loggedIds.has(peptide.id));
     const map = new Map<string, Peptide[]>();
     due.forEach(p => { const group = groupKey(p.mixGroupId); const key = group ? `group:${group}` : p.id; map.set(key, [...(map.get(key) ?? []), p]); });
-    return [...map.values()].sort((a,b) => {const aSchedule=resolvedSchedule(a[0],store.mixGroups),bSchedule=resolvedSchedule(b[0],store.mixGroups);return (aSchedule.frequency==="as_needed"?"99:99":aSchedule.time).localeCompare(bSchedule.frequency==="as_needed"?"99:99":bSchedule.time)}).map(items=>({items,scheduledDate:date,carryover}));
+    return [...map.values()].sort((a, b) => { const aSchedule = resolvedSchedule(a[0], store.mixGroups), bSchedule = resolvedSchedule(b[0], store.mixGroups); return (aSchedule.frequency === "as_needed" ? "99:99" : aSchedule.time).localeCompare(bSchedule.frequency === "as_needed" ? "99:99" : bSchedule.time); }).map(items => ({ items, scheduledDate: date, carryover }));
   };
-  const groups = [...(stockholmHour()<12?groupsFor(yesterday,true):[]),...groupsFor(today,false)];
+  const carryover = stockholmHour() < 12 ? groupsFor(yesterday, true) : [];
+  const pending = groupsFor(today, false);
+  const groups = [...carryover, ...pending];
+  const doneRows = (() => {
+    const rows = new Map<string, DoneRow>();
+    for (const log of store.logs.filter(value => logScheduledDate(value, boundary) === today)) {
+      const key = `${log.mixGroupId ? groupKey(log.mixGroupId) : log.peptideId}|${log.takenAt}|${log.status}`;
+      const row = rows.get(key);
+      if (row) { row.names = `${row.names} + ${log.peptideName}`; row.iu += log.computedIu; row.logIds.push(log.id); }
+      else rows.set(key, { key, names: log.peptideName, status: log.status, takenAt: log.takenAt, iu: log.computedIu, site: log.site, slot: log.slot, logIds: [log.id] });
+    }
+    return [...rows.values()].sort((a, b) => a.takenAt.localeCompare(b.takenAt));
+  })();
+  const keyOf = (target: LogTarget) => `${target.scheduledDate}:${target.items.map(item => item.id).join(",")}`;
+  // Open today's next dose by default; yesterday's leftovers stay compact.
+  const defaultOpen = pending[0] ?? carryover[0];
+  const openKey = expanded === undefined ? (defaultOpen ? keyOf(defaultOpen) : null) : expanded;
+  const total = pending.length + doneRows.length;
+  const handled = doneRows.length;
+  const allDone = total > 0 && pending.length === 0;
+  const next = pending.find(target => resolvedSchedule(target.items[0], store.mixGroups).frequency !== "as_needed");
   const scheduledToday = store.peptides.filter(peptide => isDueOn(peptide, store, today));
   const hasCheckinData = hasWellbeingData(noteEntry);
-  const isCheckinExpanded = checkinOpen ?? hasCheckinData;
-  const showCheckinPrompt = scheduledToday.length > 0 && groups.every(group => group.carryover) && store.logs.some(log => log.status === "taken" && logScheduledDate(log, store.settings.dayBoundaryHour) === today) && !hasCheckinData && checkinDeferredDate !== today;
+  const showCheckinPrompt = scheduledToday.length > 0 && pending.length === 0 && doneRows.some(row => row.status === "taken") && !hasCheckinData && checkinDeferredDate !== today;
+  const nowTime = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()).replace(".", ":");
+  const recentIds = new Set(toast?.logIds ?? []);
+
+  const showToast = (message: string, logIds: string[]) => setToast({ message, logIds });
   const saveLogs = (target: LogTarget, status: "taken" | "skipped", site?: string, actualDoses?: Record<string, number>) => {
-    const {items,scheduledDate}=target;
-    const completesToday = scheduledDate === today && groups.filter(group => !group.carryover).length === 1;
+    const { items, scheduledDate } = target;
     const now = new Date().toISOString();
     const newLogs: DoseLog[] = items.map(p => {
       const actualDose = actualDoses?.[p.id] ?? p.doseMcg;
-      return { id: uid(), peptideId: p.id, peptideName: p.name, plannedDose: p.doseMcg, actualDose, unit: "mcg", computedIu: syringeUnits(actualDose, p.vialMg, p.waterMl), slot: resolvedSchedule(p,store.mixGroups).slot, takenAt: now, scheduledDate, status, site, mixGroupId: p.mixGroupId, vialId: p.currentVialId ?? p.id, note: "" };
+      return { id: uid(), peptideId: p.id, peptideName: p.name, plannedDose: p.doseMcg, actualDose, unit: "mcg", computedIu: syringeUnits(actualDose, p.vialMg, p.waterMl), slot: resolvedSchedule(p, store.mixGroups).slot, takenAt: now, scheduledDate, status, site, mixGroupId: p.mixGroupId, vialId: p.currentVialId ?? p.id, note: "" };
     });
     update(s => ({ ...s, logs: [...newLogs, ...s.logs], peptides: s.peptides.map(p => {
       if (!items.some(item => item.id === p.id) || status !== "taken") return p;
       const actualDose = actualDoses?.[p.id] ?? p.doseMcg;
-      return {...p, remainingMg: clampInventoryMg(p.remainingMg - (actualDose / 1000), p.vialMg), lastSite: site ?? p.lastSite };
+      return { ...p, remainingMg: clampInventoryMg(p.remainingMg - (actualDose / 1000), p.vialMg), lastSite: site ?? p.lastSite };
     }) }));
-    setUndoIds(newLogs.map(l => l.id)); window.setTimeout(() => setUndoIds([]), 30000);
-    if (completesToday && status === "taken" && !hasCheckinData) {
-      setCheckinOpen(false);
-      window.setTimeout(() => checkinRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
-    }
+    setExpanded(undefined);
+    showToast(`${items.map(item => item.name).join(" + ")} ${status === "taken" ? "loggad" : "överhoppad"}`, newLogs.map(log => log.id));
   };
-  const undo = () => { update(s => undoIds.reduce((next, id) => deleteDoseLog(next, id), s)); setUndoIds([]); };
-  const dateText = displayLogDate(today, { weekday: "long", day: "numeric", month: "long" });
-  const nowTime = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()).replace(".",":");
-  const saveNote = (changes: Partial<DailyNote>) => update(s => ({...s, dailyNotes: [...s.dailyNotes.filter(v => v.date !== today), {...noteEntry, ...changes, date: today}]}));
-  const toggleTag = (tag: DailyTagId) => { haptic(); saveNote({ tags: noteEntry.tags.includes(tag) ? noteEntry.tags.filter(value => value !== tag) : [...noteEntry.tags, tag] }); };
-  const addCustomTag = () => { const value = customTag.trim().slice(0, 40); if (!value) return; update(s => ({...s, settings: {...s.settings, customDailyTags: [...new Set([...s.settings.customDailyTags, value])]}, dailyNotes: [...s.dailyNotes.filter(v => v.date !== today), {...noteEntry, tags: [...new Set([...noteEntry.tags, value])]}]})); setCustomTag(""); };
-  const removeCustomTag = (tag: string) => update(s => ({...s, settings: {...s.settings, customDailyTags: s.settings.customDailyTags.filter(value => value !== tag)}}));
-  const openCheckin = () => { setCheckinOpen(true); window.setTimeout(() => checkinRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); };
+  const undo = () => { const ids = toast?.logIds ?? []; update(s => ids.reduce((next, id) => deleteDoseLog(next, id), s)); setToast(null); };
+  const saveNote = (changes: Partial<DailyNote>) => update(s => {
+    const current = s.dailyNotes.find(v => v.date === today) ?? { date: today, note: "", tags: [] };
+    const customDailyTags = changes.tags ? [...new Set([...s.settings.customDailyTags, ...changes.tags.filter(tag => !dailyTags.some(value => value.id === tag) && !legacyTagLabels[tag])])] : s.settings.customDailyTags;
+    return { ...s, settings: { ...s.settings, customDailyTags }, dailyNotes: [...s.dailyNotes.filter(v => v.date !== today), { ...current, ...changes, date: today }] };
+  });
+  const removeCustomTag = (tag: string) => update(s => ({ ...s, settings: { ...s.settings, customDailyTags: s.settings.customDailyTags.filter(value => value !== tag) } }));
+  const closeCheckin = () => { setCheckinOpen(false); onCheckinClosed(); };
   const deferCheckin = () => { try { window.sessionStorage.setItem(CHECKIN_LATER_KEY, today); } catch {} setCheckinDeferredDate(today); };
   const adjustedItems = adjustTarget?.items.map(item => ({ ...item, doseMcg: adjustDoses[item.id] ?? item.doseMcg })) ?? [];
   const adjustedTotalIu = adjustedItems.reduce((sum, item) => sum + syringeUnits(item.doseMcg, item.vialMg, item.waterMl), 0);
   const adjustedDosesValid = adjustedItems.length > 0 && adjustedItems.every(item => Number.isFinite(item.doseMcg) && item.doseMcg > 0);
+  const massUnit = store.settings.massDisplayUnit;
+  const mass = (mcg: number) => `${massN(massUnit === "mg" ? mcg / 1000 : mcg)} ${massUnit}`;
+  const title = displayLogDate(today, { weekday: "long", day: "numeric", month: "long" });
+
+  const renderPending = (target: LogTarget) => {
+    const { items, carryover: isCarryover } = target;
+    const first = items[0];
+    const schedule = resolvedSchedule(first, store.mixGroups);
+    const key = keyOf(target);
+    const open = openKey === key;
+    const asNeeded = schedule.frequency === "as_needed";
+    const lateMinutes = !isCarryover && !asNeeded ? minutesBetween(schedule.time, nowTime) : 0;
+    const totalIu = items.reduce((sum, p) => sum + syringeUnits(p.doseMcg, p.vialMg, p.waterMl), 0);
+    const totalDoseMcg = items.reduce((sum, p) => sum + p.doseMcg, 0);
+    const isMix = items.length > 1;
+    const selectedSite = siteSelections[key];
+    const expired = items.some(item => (vialDaysLeft(item) ?? 1) <= 0);
+    const lowInventory = items.map(item => ({ item, days: inventoryDaysLeft(item, store) })).filter(value => value.days !== null && value.days <= 15);
+    const overCapacity = totalIu > syringeCapacity(store.settings.syringe);
+    const warn = expired || overCapacity || lowInventory.length > 0;
+    const timing = isCarryover ? `Igår${asNeeded ? "" : ` ${schedule.time}`}` : asNeeded ? "Vid behov" : lateMinutes >= 15 ? <span className="font-medium text-destructive">{schedule.time} · {lateLabel(lateMinutes)}</span> : schedule.time;
+    const take = (site?: string) => { haptic(); saveLogs(target, "taken", site); };
+    return <Card key={key} className="overflow-hidden transition-shadow">
+      <div className="flex items-center gap-3 p-4">
+        <button type="button" onClick={() => setExpanded(open ? null : key)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <DoseBadge items={items}/>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5"><span className="truncate text-[17px] font-semibold leading-snug">{items.map(i => i.name).join(" + ")}</span>{warn && <TriangleAlert aria-label="Kontrollera" className="size-4 shrink-0 text-amber-600 dark:text-amber-300"/>}</span>
+            <span className="mt-0.5 block truncate text-[15px] tabular-nums text-muted-foreground">{timing} · {n(totalIu)} IU{items.some(item => item.fasted) ? " · Fastande" : ""}</span>
+          </span>
+        </button>
+        {!open && <button type="button" onClick={() => take(undefined)} className="min-h-9 shrink-0 rounded-full bg-primary px-4 text-[15px] font-semibold text-primary-foreground transition-transform active:scale-95">Ta</button>}
+      </div>
+      {open && <div className="space-y-4 px-4 pb-4 animate-in fade-in-0 slide-in-from-top-1 duration-200">
+        {expired && <p className="flex gap-2 rounded-xl bg-destructive/10 p-3 text-[15px] text-destructive"><TriangleAlert className="mt-0.5 size-4 shrink-0"/>Vialens användningstid har passerat. Kontrollera uppgifterna.</p>}
+        {overCapacity && <p className="flex gap-2 rounded-xl bg-destructive/10 p-3 text-[15px] text-destructive"><TriangleAlert className="mt-0.5 size-4 shrink-0"/>{n(totalIu)} IU ryms inte i din {store.settings.syringe}-spruta ({syringeCapacity(store.settings.syringe)} IU).</p>}
+        {lowInventory.map(({ item, days }) => <p key={item.id} className="flex gap-2 rounded-xl bg-amber-500/12 p-3 text-[15px] text-amber-800 dark:text-amber-200"><TriangleAlert className="mt-0.5 size-4 shrink-0"/>{item.name}: {days === 0 ? "lagret är slut" : `räcker ca ${days} ${days === 1 ? "dag" : "dagar"} till`}</p>)}
+        {isMix
+          ? <div className="overflow-hidden rounded-2xl bg-secondary/60 tabular-nums"><p className="flex items-center gap-2 px-4 pb-1 pt-3 text-[13px] font-medium text-muted-foreground"><Syringe className="size-4"/>Dra upp från varje vial</p><div className="grid grid-cols-2">{items.map((item, index) => <div key={item.id} className={`min-w-0 px-4 py-3 ${index % 2 ? "border-l border-border" : ""}`}><p className="truncate text-[15px] font-medium">{item.name}</p><strong className="mt-1 block text-[26px] font-semibold leading-none tracking-tight">{n(syringeUnits(item.doseMcg, item.vialMg, item.waterMl))} IU</strong><span className="mt-1 block text-[13px] text-muted-foreground">{mass(item.doseMcg)}{item.fasted ? " · Fastande" : ""}</span></div>)}</div><SyringeDrawBar items={items}/><div className="flex items-center justify-between border-t border-border px-4 py-3"><span className="text-[15px] font-semibold">Totalt i sprutan</span><span className="text-right"><strong className="block text-[22px] font-semibold leading-none">{n(totalIu)} IU</strong><span className="mt-1 block text-[13px] text-muted-foreground">{mass(totalDoseMcg)}</span></span></div></div>
+          : <div className="flex items-end justify-between gap-4 rounded-2xl bg-secondary/60 px-4 py-4 tabular-nums"><span className="text-[15px] text-muted-foreground">Dra upp<span className="mt-0.5 block text-[13px]">U-100 · {mass(totalDoseMcg)}</span></span><strong className="text-[34px] font-semibold leading-none tracking-tight">{n(totalIu)} <span className="text-[22px]">IU</span></strong></div>}
+        {first.route === "subcutaneous" && first.sites.length > 0 && <div><div className="mb-2 flex items-baseline justify-between gap-3"><p className="text-[15px] font-semibold">Injektionsplats <span className="font-normal text-muted-foreground">· valfritt</span></p>{first.lastSite && <span className="text-[13px] text-muted-foreground">Senast: {first.lastSite}</span>}</div><div className="flex flex-wrap gap-2">{first.sites.map(site => <button type="button" key={site} aria-pressed={selectedSite === site} onClick={() => { haptic(); setSiteSelections(value => ({ ...value, [key]: value[key] === site ? "" : site })); }} className={`min-h-10 rounded-full px-3.5 text-[15px] transition-colors ${selectedSite === site ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground/80"}`}>{site}</button>)}</div></div>}
+        <Button className="h-[52px] w-full rounded-[14px] text-[17px]" onClick={() => take(selectedSite || undefined)}><Check className="size-5" strokeWidth={2.6}/> Ta dos</Button>
+        <div className="grid grid-cols-2 gap-2"><Button variant="secondary" className="h-11 rounded-[12px] text-[15px] font-medium" onClick={() => { haptic(); saveLogs(target, "skipped"); }}>Hoppa över</Button><Button variant="secondary" className="h-11 rounded-[12px] text-[15px] font-medium" onClick={() => { setAdjustTarget(target); setAdjustDoses(Object.fromEntries(items.map(item => [item.id, item.doseMcg]))); }}>Justera dos</Button></div>
+        <p className="text-[13px] leading-[18px] text-muted-foreground">{items.map(item => { const days = vialDaysLeft(item); return `${item.name}: ${n(item.remainingMg)} mg kvar${days !== null ? ` · vialen ${days > 0 ? `${days} d kvar` : "passerad"}` : ""}`; }).join(" · ")}</p>
+      </div>}
+    </Card>;
+  };
+
+  const renderDone = (row: DoneRow) => <div key={row.key} className="flex items-center gap-3 rounded-[18px] bg-card/70 px-4 py-3">
+    <span className={`grid size-11 shrink-0 place-items-center rounded-full ${row.status === "taken" ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"} ${row.logIds.some(id => recentIds.has(id)) ? "animate-in zoom-in-50 duration-300" : ""}`}>{row.status === "taken" ? <Check className="size-5" strokeWidth={3}/> : <X className="size-5" strokeWidth={2.6}/>}</span>
+    <span className="min-w-0 flex-1"><span className="block truncate text-[17px] text-muted-foreground">{row.names}</span><span className="mt-0.5 block truncate text-[13px] tabular-nums text-muted-foreground">{row.status === "taken" ? `Tagen ${clock(row.takenAt)} · ${n(row.iu)} IU${row.site ? ` · ${row.site}` : ""}` : `Överhoppad ${clock(row.takenAt)}`}</span></span>
+  </div>;
+
   return <>
-    <PageHeader eyebrow="Peptime" title="Idag" action={streak > 0 ? <div className="rounded-full bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground">{streak} {streak === 1 ? "dag" : "dagar"}</div> : undefined} />
-    <button type="button" onClick={openCalendar} className="-mt-3 mb-7 flex min-h-12 items-center gap-2 rounded-xl px-1 text-[17px] font-medium capitalize text-primary"><CalendarDays className="size-5"/>{dateText}<ChevronRight className="size-4"/></button>
-    {groups.length === 0 && done.length === 0 && <Card className="p-7 text-center"><CheckCircle2 className="mx-auto size-7 text-primary"/><p className="mt-4 font-medium">Inget planerat idag</p><p className="mt-2 text-sm text-muted-foreground">Dagens schema är tomt.</p></Card>}
-    <div className="space-y-5">{groups.map((target,index) => { const {items,carryover,scheduledDate}=target; const first = items[0]; const schedule=resolvedSchedule(first,store.mixGroups); const previous=groups[index-1]; const showHeading=!previous||previous.carryover!==carryover||resolvedSchedule(previous.items[0],store.mixGroups).slot!==schedule.slot; const late=carryover||(schedule.frequency!=="as_needed"&&nowTime>schedule.time); const totalIu = items.reduce((sum,p) => sum + syringeUnits(p.doseMcg,p.vialMg,p.waterMl),0); const totalDoseMcg=items.reduce((sum,p)=>sum+p.doseMcg,0); const isMix = items.length > 1; const massUnit=store.settings.massDisplayUnit; const massDoseLine=`${massN(massUnit==="mg"?totalDoseMcg/1000:totalDoseMcg)} ${massUnit}`; const targetKey=`${scheduledDate}:${items.map(i=>i.id).join(",")}`; const selectedSite=siteSelections[targetKey]; const expired=items.some(item=>(vialDaysLeft(item)??1)<=0); const lowInventory=items.map(item=>({item,days:inventoryDaysLeft(item,store)})).filter(value=>value.days!==null&&value.days<=15); return <section key={`${scheduledDate}-${items.map(i=>i.id).join("-")}`}>
-      {showHeading&&<h2 className={`mb-3 text-lg font-semibold ${carryover?"text-accent-foreground":""}`}>{carryover?`Från igår · ${slotNames[schedule.slot]}`:slotNames[schedule.slot]}</h2>}
-      <Card className="overflow-hidden p-5">
-        <div className="mb-4 flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xl font-semibold leading-snug">{items.map(i=>i.name).join(" + ")}</p>{!isMix&&first.fasted&&<div className="mt-2"><FastedBadge/></div>}</div><span className={`shrink-0 text-[15px] tabular-nums ${late?"font-medium text-destructive":"text-muted-foreground"}`}>{schedule.frequency==="as_needed"?"Vid behov":schedule.time}</span></div>
-        {expired && <div className="mb-4 flex gap-2 rounded-xl bg-destructive/10 p-3 text-sm text-destructive"><TriangleAlert className="mt-0.5 size-4 shrink-0" /> Angiven användningstid för vialen har passerat. Kontrollera uppgifterna.</div>}
-        {isMix?<div className="mb-4 overflow-hidden rounded-2xl border border-border bg-muted/40 tabular-nums dark:bg-black/25"><div className="flex items-center gap-2 px-4 pb-2 pt-3 text-sm font-medium text-muted-foreground"><Syringe className="size-4" /> Dra upp från varje vial</div><div className="grid grid-cols-2 border-y border-border">{items.map((i,index)=><div key={i.id} className={`min-w-0 px-4 py-3 ${index%2?"border-l border-border":""}`}><div className="min-h-[68px]"><p className="text-base font-medium leading-tight">{i.name}</p>{i.fasted&&<div className="mt-2"><FastedBadge/></div>}</div><strong className="mt-2 block text-2xl font-semibold leading-none tracking-tight">{n(syringeUnits(i.doseMcg,i.vialMg,i.waterMl))} IU</strong><span className="mt-1.5 block text-base font-medium leading-none text-foreground/70">{massN(massUnit==="mg"?i.doseMcg/1000:i.doseMcg)} {massUnit}</span></div>)}</div><SyringeDrawBar items={items}/><div className="flex min-h-14 items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-2.5 dark:bg-white/[.025]"><span className="text-base font-semibold">Totalt i sprutan</span><span className="shrink-0 text-right"><strong className="block text-2xl font-semibold leading-none tracking-tight">{n(totalIu)} IU</strong><span className="mt-1.5 block text-base font-medium leading-none text-foreground/75">{massDoseLine}</span></span></div></div>:<div className="mb-4 flex items-center justify-between gap-4 rounded-2xl border border-border bg-muted/40 px-4 py-4 tabular-nums dark:bg-black/25"><span className="flex items-center gap-2 text-base text-muted-foreground"><Syringe className="size-5" /> U-100</span><span className="text-right"><strong className="block text-[30px] font-semibold leading-none">{n(totalIu)} IU</strong><span className="mt-2 block text-base font-medium leading-none text-foreground/75">{massDoseLine}</span></span></div>}
-        {totalIu > syringeCapacity(store.settings.syringe) && <div className="mb-4 flex gap-2 rounded-xl bg-destructive/10 p-3 text-sm text-destructive"><TriangleAlert className="mt-0.5 size-4 shrink-0"/>Dosen är {n(totalIu)} IU och ryms inte i din valda {store.settings.syringe}-spruta ({syringeCapacity(store.settings.syringe)} IU).</div>}
-        {lowInventory.length>0&&<div className="mb-4 flex flex-wrap gap-2" aria-label="Lågt lager">{lowInventory.map(({item,days})=><span key={item.id} className="inline-flex min-h-9 items-center gap-2 rounded-xl bg-amber-500/10 px-3 text-sm font-medium text-amber-800 dark:text-amber-200"><TriangleAlert className="size-4"/>{peptideCode(item)} · {days===0?"lagret slut":"ca "+days+" dagar kvar"}</span>)}</div>}
-        {first.route==="subcutaneous"&&first.sites.length>0&&<div className="mb-5"><div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><p className="text-base font-semibold">Injektionsplats <span className="font-normal text-muted-foreground">(valfritt)</span></p>{first.lastSite&&<span className="text-sm text-muted-foreground">Senast: {first.lastSite}</span>}</div><div className="flex flex-wrap gap-2">{first.sites.map(site=><button type="button" key={site} aria-pressed={selectedSite===site} onClick={()=>{haptic();setSiteSelections(value=>({...value,[targetKey]:value[targetKey]===site?"":site}))}} className={`min-h-11 rounded-full border px-4 text-[15px] font-medium transition-colors ${selectedSite===site?"border-primary bg-accent text-accent-foreground":"border-border bg-background/60 text-muted-foreground dark:bg-black/20"}`}>{site}</button>)}</div></div>}
-        <Button className="h-14 w-full rounded-2xl text-base font-semibold" onClick={() => {haptic();saveLogs(target,"taken",selectedSite||undefined)}}><Check className="size-5" /> Ta dos</Button>
-        <div className="mt-2 grid grid-cols-2 gap-2"><Button className="h-12 rounded-xl text-[15px] text-muted-foreground" variant="ghost" onClick={() => {haptic();saveLogs(target,"skipped")}}>Hoppa över</Button><Button className="h-12 rounded-xl text-[15px] text-muted-foreground" variant="ghost" onClick={() => {setAdjustTarget(target);setAdjustDoses(Object.fromEntries(items.map(item => [item.id, item.doseMcg])))}}>Justera dos</Button></div>
-        <details className="group mt-2 border-t border-border/70 pt-1 text-sm text-muted-foreground"><summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 py-2 [&::-webkit-details-marker]:hidden"><FlaskConical className="size-4"/><span className="flex-1">Vial och lager</span><ChevronRight className="size-4 transition-transform group-open:rotate-90"/></summary><div className="space-y-1 pb-2 pl-6">{items.map(item=>{const days=vialDaysLeft(item);return <p key={item.id}>{item.name}: {n(item.remainingMg)} mg kvar{days!==null?` · ${Math.max(0,days)} dagar enligt din vialgräns`:""}</p>})}</div></details>
-      </Card>
-    </section>})}</div>
-    {showCheckinPrompt && !isCheckinExpanded && <section ref={checkinRef} className="mt-7 scroll-mt-24"><Card className="border-primary/30 bg-accent/40 p-5"><div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground"><CheckCircle2 className="size-6"/></span><div><h2 className="text-xl font-semibold leading-tight">Klart för idag</h2><p className="mt-2 text-[15px] leading-6 text-muted-foreground">Dagens doser är hanterade. Hur har du mått?</p></div></div><Button type="button" onClick={openCheckin} className="mt-5 h-14 w-full rounded-2xl text-base font-semibold">Logga dagens mående <ChevronRight className="size-5"/></Button><button type="button" onClick={deferCheckin} className="mt-2 flex min-h-11 w-full items-center justify-center text-sm font-medium text-muted-foreground">Senare</button></Card></section>}
-    {done.length > 0 && <section className="mt-7"><h2 className="mb-3 text-lg font-semibold">Klart</h2><Card className="divide-y divide-border">{done.map(p => { const log = store.logs.find(l=>l.peptideId===p.id && logScheduledDate(l,store.settings.dayBoundaryHour)===today); return <div key={p.id} className="flex min-h-14 items-center gap-3 px-4 py-2 text-base"><CheckCircle2 className="size-5 text-primary"/><span className="min-w-0 flex-1 text-muted-foreground"><span className="block truncate">{p.name}</span>{p.fasted&&<span className="mt-1 block"><FastedBadge/></span>}</span><span className="tabular-nums text-muted-foreground">{log?.status === "skipped" ? "Överhoppad" : `${n(log?.computedIu ?? 0)} IU`}</span></div>})}</Card></section>}
-    {undoIds.length > 0 && <button onClick={undo} className="fixed bottom-24 left-1/2 z-40 flex min-h-12 -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-5 text-sm text-background shadow-xl"><RotateCcw className="size-4"/> Ångra</button>}
-    {(!showCheckinPrompt || isCheckinExpanded) && <section ref={checkinRef} className="mt-7 scroll-mt-24"><SectionHeading title="Dagens mående" detail="Sömn, trötthet, värk och aktivitet"/><Card className="overflow-hidden"><button type="button" className="flex min-h-14 w-full items-center justify-between gap-4 px-5 text-left" onClick={() => setCheckinOpen(value => !(value ?? hasCheckinData))} aria-expanded={isCheckinExpanded}><span className="text-[15px] text-muted-foreground">{hasCheckinData?"Dagens svar":"Inte ifylld"}</span><span className="flex items-center gap-1 text-[13px] font-medium text-primary">{isCheckinExpanded ? "Dölj" : "Fyll i"}<ChevronRight className={`size-4 transition-transform ${isCheckinExpanded ? "-rotate-90" : ""}`}/></span></button>{isCheckinExpanded && <div className="space-y-4 border-t border-border p-4">{wellbeingScales.map(scale => <WellbeingScale key={scale.key} scale={scale} value={noteEntry[scale.key]} onChange={value => saveNote({ [scale.key]: value })}/>) }<div><p className="mb-2 text-[15px] font-semibold">Hur har dagen känts?</p><div className="flex flex-wrap gap-2">{dailyTags.map(tag=><button type="button" key={tag.id} aria-pressed={noteEntry.tags.includes(tag.id)} onClick={()=>toggleTag(tag.id)} className={`min-h-11 rounded-full px-3 text-[13px] transition-colors ${noteEntry.tags.includes(tag.id)?"bg-primary text-primary-foreground":"bg-muted text-muted-foreground"}`}>{tag.label}</button>)}{store.settings.customDailyTags.map(tag=><span key={tag} className="inline-flex overflow-hidden rounded-full bg-muted"><button type="button" aria-pressed={noteEntry.tags.includes(tag)} onClick={()=>toggleTag(tag)} className={`min-h-11 px-3 text-[13px] ${noteEntry.tags.includes(tag)?"bg-primary text-primary-foreground":"text-muted-foreground"}`}>{tag}</button><button type="button" onClick={()=>removeCustomTag(tag)} aria-label={`Ta bort taggen ${tag}`} className="min-h-11 border-l border-border px-2 text-muted-foreground"><X className="size-3.5"/></button></span>)}</div><div className="mt-3 flex gap-2"><Input value={customTag} onChange={event=>setCustomTag(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addCustomTag();}}} maxLength={40} placeholder="Skapa egen tagg"/><Button type="button" variant="outline" className="shrink-0" onClick={addCustomTag}><Plus/> Lägg till</Button></div></div><div><label htmlFor="daily-note" className="mb-2 block text-[15px] font-semibold">Anteckning <span className="font-normal text-muted-foreground">· valfritt</span></label><Textarea id="daily-note" value={note} onChange={e=>saveNote({ note: e.target.value })} placeholder="Något mer du vill komma ihåg?" className="resize-none"/></div><p className="text-right text-xs text-muted-foreground">Sparas automatiskt</p></div>}</Card></section>}
-    <Dialog open={!!adjustTarget} onOpenChange={open=>!open&&setAdjustTarget(null)}><DialogContent><DialogHeader><DialogTitle>Justera endast denna dos</DialogTitle><DialogDescription>Detta ändrar inte protokollet. Varje peptid räknas med sin egen vialstyrka.</DialogDescription></DialogHeader><div className="space-y-3">{adjustTarget?.items.map(item => {const dose=adjustDoses[item.id]??item.doseMcg;return <label key={item.id} className="block text-xs text-muted-foreground">{item.name} · faktisk dos (mcg)<Input className="mt-2 h-12" min="0.01" step="any" type="number" value={dose} onChange={e=>setAdjustDoses(values=>({...values,[item.id]:Number(e.target.value)}))}/><span className="mt-1.5 block text-sm text-foreground">{n(dose)} mcg = {n(syringeUnits(dose,item.vialMg,item.waterMl))} IU</span></label>})}</div>{adjustedItems.length>1&&<div className="rounded-xl bg-muted p-3 text-sm"><SyringeDrawBar items={adjustedItems}/><p className="px-4 pb-2 text-right font-semibold">Totalt {n(adjustedTotalIu)} IU</p></div>}<Button disabled={!adjustedDosesValid} className="h-12" onClick={()=>{if(adjustTarget){const key=`${adjustTarget.scheduledDate}:${adjustTarget.items.map(item=>item.id).join(",")}`;saveLogs(adjustTarget,"taken",siteSelections[key]||undefined,adjustDoses)}setAdjustTarget(null)}}>Logga justerad dos</Button></DialogContent></Dialog>
+    <PageHeader title="Idag" subtitle={<span className="capitalize">{title}</span>} action={<><HeaderButton label="Öppna kalendern" onClick={openCalendar}><CalendarDays/></HeaderButton>{headerAction}</>}/>
+    {total > 0 && <Card className="mb-7 flex items-center gap-4 p-4">
+      <ProgressRing value={handled} total={total} size={64} stroke={7}>{allDone ? <Check className="size-6 text-primary" strokeWidth={3}/> : <span className="text-[15px] font-semibold tabular-nums">{handled}/{total}</span>}</ProgressRing>
+      <div className="min-w-0">
+        <p className="text-[20px] font-bold leading-tight tracking-[-.01em]">{allDone ? "Klart för idag" : `${handled} av ${total} ${total === 1 ? "dos" : "doser"}`}</p>
+        <p className="mt-0.5 truncate text-[15px] text-muted-foreground">{next ? `Nästa: ${next.items.map(item => item.name).join(" + ")} · ${resolvedSchedule(next.items[0], store.mixGroups).time}` : allDone ? "Alla dagens doser är hanterade." : "Vid behov kvar"}</p>
+        {streak > 0 && <p className="mt-1 flex items-center gap-1 text-[13px] font-semibold text-orange-600 dark:text-orange-400"><Flame className="size-3.5"/>{streak} {streak === 1 ? "dag" : "dagar"} i rad</p>}
+      </div>
+    </Card>}
+    {groups.length === 0 && doneRows.length === 0 && <Card className="mb-7 px-6 py-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-full bg-accent text-accent-foreground"><CalendarDays className="size-7"/></span><p className="mt-4 text-[17px] font-semibold">Inget planerat idag</p><p className="mt-1 text-[15px] text-muted-foreground">Dagens schema är tomt.</p></Card>}
+    {carryover.length > 0 && <section className="mb-7"><SectionHeading title="Från igår" detail="Hanteras innan kl. 12"/><div className="space-y-2.5">{carryover.map(renderPending)}</div></section>}
+    {slotOrder.map(slot => {
+      const slotPending = pending.filter(target => resolvedSchedule(target.items[0], store.mixGroups).slot === slot);
+      const slotDone = doneRows.filter(row => row.slot === slot);
+      if (!slotPending.length && !slotDone.length) return null;
+      return <section key={slot} className="mb-7"><SectionHeading title={slotNames[slot]}/><div className="space-y-2.5">{slotPending.map(renderPending)}{slotDone.map(renderDone)}</div></section>;
+    })}
+    {showCheckinPrompt && <Card className="mb-7 p-5 text-center"><span className="mx-auto grid size-14 place-items-center rounded-full bg-rose-500/12 text-rose-500"><Heart className="size-7"/></span><p className="mt-3 text-[20px] font-bold">Hur har du mått idag?</p><p className="mt-1 text-[15px] text-muted-foreground">Tar under en minut och gör dina insikter bättre.</p><Button className="mt-4 h-[52px] w-full rounded-[14px] text-[17px]" onClick={() => setCheckinOpen(true)}>Fyll i dagens mående</Button><button type="button" onClick={deferCheckin} className="mt-1 min-h-11 w-full text-[15px] text-primary">Senare</button></Card>}
+    {!showCheckinPrompt && <section className="mb-7"><SectionHeading title="Mående"/><Card className="overflow-hidden"><ListRow icon={<Heart/>} iconClassName="bg-rose-500" title={hasCheckinData ? "Dagens mående" : "Hur mår du idag?"} subtitle={hasCheckinData ? wellbeingScales.filter(scale => noteEntry[scale.key] !== undefined).map(scale => `${scale.short} ${noteEntry[scale.key]}`).join(" · ") || `${noteEntry.tags.length} taggar` : "Sömn, trötthet, värk och aktivitet"} value={<span className="text-[15px] text-primary">{hasCheckinData ? "Ändra" : "Fyll i"}</span>} chevron onClick={() => setCheckinOpen(true)}/></Card></section>}
+    <p className="mb-2 px-1 text-center text-[13px] text-muted-foreground">{disclaimer}</p>
+    {toast && <Toast message={toast.message} actionLabel="Ångra" onAction={undo}/>}
+    <WellbeingSheet open={checkinOpen} onClose={closeCheckin} store={store} noteEntry={noteEntry} saveNote={saveNote} removeCustomTag={removeCustomTag}/>
+    <Dialog open={!!adjustTarget} onOpenChange={open => !open && setAdjustTarget(null)}><DialogContent showCloseButton={false}>
+      <SheetBar title="Justera dos" onCancel={() => setAdjustTarget(null)} doneLabel="Logga" doneDisabled={!adjustedDosesValid} onDone={() => { if (adjustTarget) saveLogs(adjustTarget, "taken", siteSelections[keyOf(adjustTarget)] || undefined, adjustDoses); setAdjustTarget(null); }}/>
+      <DialogHeader><DialogTitle className="sr-only">Justera dos</DialogTitle><DialogDescription>Gäller bara den här dosen. Schemat ändras inte.</DialogDescription></DialogHeader>
+      <div className="space-y-3">{adjustTarget?.items.map(item => { const dose = adjustDoses[item.id] ?? item.doseMcg; return <label key={item.id} className="block text-[13px] text-muted-foreground">{item.name} · dos (mcg)<Input className="mt-1.5 h-12 bg-secondary/60 text-[17px]" min="0.01" step="any" type="number" inputMode="decimal" value={dose} onChange={e => setAdjustDoses(values => ({ ...values, [item.id]: Number(e.target.value) }))}/><span className="mt-1.5 block text-[15px] text-foreground">{n(dose)} mcg = {n(syringeUnits(dose, item.vialMg, item.waterMl))} IU</span></label>; })}</div>
+      {adjustedItems.length > 1 && <div className="rounded-xl bg-secondary/60 text-sm"><SyringeDrawBar items={adjustedItems}/><p className="px-4 pb-3 text-right font-semibold">Totalt {n(adjustedTotalIu)} IU</p></div>}
+    </DialogContent></Dialog>
   </>;
 }
 
-function LogView({ store, update }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>> }) {
-  const [query,setQuery]=useState(""); const [date,setDate]=useState(""); const [edit,setEdit]=useState<DoseLog|null>(null); const [visibleCount,setVisibleCount]=useState(50);
-  const filteredLogs=store.logs.filter(l=>(!query||l.peptideName.toLowerCase().includes(query.toLowerCase()))&&(!date||logScheduledDate(l,store.settings.dayBoundaryHour)===date)).sort((a,b)=>b.takenAt.localeCompare(a.takenAt));
-  const logs=filteredLogs.slice(0,visibleCount);
-  return <><PageHeader eyebrow="Historik" title="Logg"/><div className="mb-6 grid grid-cols-[1fr_142px] gap-2"><div className="relative"><Search className="absolute left-3 top-3.5 size-4 text-muted-foreground"/><Input value={query} onChange={e=>{setQuery(e.target.value);setVisibleCount(50)}} placeholder="Peptid" className="h-11 pl-9"/></div><Input type="date" value={date} onChange={e=>{setDate(e.target.value);setVisibleCount(50)}} className="h-11"/></div>{logs.length===0?<Card className="p-7 text-center"><History className="mx-auto size-7 text-muted-foreground"/><p className="mt-4 font-medium">Ingen historik ännu</p><p className="mt-2 text-sm text-muted-foreground">Loggade och överhoppade doser visas här.</p></Card>:<div className="space-y-3">{logs.map(log=>{const scheduledDate=logScheduledDate(log,store.settings.dayBoundaryHour);const takenDate=stockholmDate(log.takenAt);return <Card key={log.id} className="p-4"><div className="flex items-start gap-3"><div className={`mt-0.5 grid size-9 place-items-center rounded-full ${log.status==="taken"?"bg-accent text-accent-foreground":"bg-muted text-muted-foreground"}`}>{log.status==="taken"?<Check className="size-4"/>:<X className="size-4"/>}</div><div className="min-w-0 flex-1"><div className="flex justify-between gap-3"><p className="font-medium">{log.peptideName}</p><span className="text-xs tabular-nums text-muted-foreground">{new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Stockholm",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(log.takenAt))}</span></div><p className="mt-1 text-sm text-muted-foreground">{log.status==="taken"?`${n(log.actualDose)} ${log.unit} · ${n(log.computedIu)} IU${log.site?` · ${log.site}`:""}`:"Överhoppad"}</p>{scheduledDate!==takenDate&&<p className="mt-1 text-xs text-accent-foreground">Hör till schemat {scheduledDate}</p>}</div><Button variant="ghost" size="icon" aria-label="Redigera logg" onClick={()=>setEdit({...log,scheduledDate})}><MoreHorizontal/></Button></div></Card>})}{filteredLogs.length>logs.length&&<Button variant="outline" className="h-12 w-full" onClick={()=>setVisibleCount(count=>count+50)}>Visa fler</Button>}</div>}
-    <Dialog open={!!edit} onOpenChange={open=>!open&&setEdit(null)}><DialogContent><DialogHeader><DialogTitle>Redigera logg</DialogTitle><DialogDescription>{edit?.peptideName}</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><label className="text-xs text-muted-foreground">Schemalagd dag<Input type="date" className="mt-2 h-11" value={edit?.scheduledDate??""} onChange={e=>{if(e.target.value)setEdit(v=>v?{...v,scheduledDate:e.target.value}:v)}}/></label><label className="text-xs text-muted-foreground">Faktisk tid<Input type="datetime-local" className="mt-2 h-11" value={edit?stockholmDateTimeInput(edit.takenAt):""} onChange={e=>{if(e.target.value)setEdit(v=>v?{...v,takenAt:stockholmLocalToIso(e.target.value)}:v)}}/></label></div><label className="text-xs text-muted-foreground">Faktisk dos<Input min="0" step="any" type="number" className="mt-2 h-11" value={edit?.actualDose??0} onChange={e=>setEdit(v=>v?{...v,actualDose:Number(e.target.value)}:v)}/></label><label className="text-xs text-muted-foreground">Anteckning<Textarea className="mt-2" value={edit?.note??""} onChange={e=>setEdit(v=>v?{...v,note:e.target.value}:v)}/></label><Button disabled={!edit||!Number.isFinite(edit.actualDose)||edit.actualDose<0} className="h-11" onClick={()=>{if(edit)update(s=>replaceDoseLog(s,edit));setEdit(null)}}><Pencil/> Spara</Button><Button variant="destructive" className="h-11" onClick={()=>{if(edit)update(s=>deleteDoseLog(s,edit.id));setEdit(null)}}><Trash2/> Ta bort och återställ lager</Button></DialogContent></Dialog>
+/** A list row that reveals actions when swiped left, like iOS Mail. Tapping opens it. */
+function SwipeRow({ children, actions, onTap, label }: { children: React.ReactNode; actions: { label: string; className: string; onClick: () => void }[]; onTap: () => void; label: string }) {
+  const width = actions.length * 84;
+  const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<{ x: number; y: number; start: number; axis?: "x" | "y" } | null>(null);
+  const moved = useRef(false);
+  const end = () => { if (drag.current?.axis === "x") setOffset(value => value < -width / 2 ? -width : 0); drag.current = null; setDragging(false); };
+  return <div className="relative overflow-hidden">
+    <div className="absolute inset-y-0 right-0 flex" style={{ width }} aria-hidden={offset === 0}>{actions.map(action => <button key={action.label} type="button" tabIndex={offset === 0 ? -1 : 0} onClick={() => { setOffset(0); action.onClick(); }} className={`flex-1 text-[15px] font-medium text-white ${action.className}`}>{action.label}</button>)}</div>
+    <button type="button" aria-label={label}
+      onPointerDown={event => { drag.current = { x: event.clientX, y: event.clientY, start: offset }; moved.current = false; }}
+      onPointerMove={event => {
+        const state = drag.current;
+        if (!state) return;
+        const dx = event.clientX - state.x, dy = event.clientY - state.y;
+        if (!state.axis && Math.hypot(dx, dy) > 8) state.axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+        if (state.axis !== "x") return;
+        if (!moved.current) event.currentTarget.setPointerCapture(event.pointerId);
+        moved.current = true;
+        setDragging(true);
+        setOffset(Math.max(-width - 24, Math.min(0, state.start + dx)));
+      }}
+      onPointerUp={end} onPointerCancel={end}
+      onClick={() => { if (moved.current) { moved.current = false; return; } if (offset !== 0) { setOffset(0); return; } onTap(); }}
+      style={{ transform: `translateX(${offset}px)` }}
+      className={`relative flex w-full touch-pan-y items-center gap-3 bg-card px-4 py-3 text-left active:bg-muted ${dragging ? "" : "transition-transform duration-200 ease-out"}`}>
+      {children}
+    </button>
+  </div>;
+}
+
+function dayHeading(date: string, today: string) {
+  if (date === today) return "Idag";
+  if (date === previousDate(today)) return "Igår";
+  return displayLogDate(date, { weekday: "long", day: "numeric", month: "long", ...(date.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}) });
+}
+
+function LogView({ store, update, headerAction, openCalendar }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; headerAction: React.ReactNode; openCalendar: () => void }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "taken" | "skipped">("all");
+  const [edit, setEdit] = useState<DoseLog | null>(null);
+  const [visibleCount, setVisibleCount] = useState(60);
+  const [removed, setRemoved] = useState<DoseLog | null>(null);
+  useEffect(() => { if (!removed) return; const timer = window.setTimeout(() => setRemoved(null), 8000); return () => window.clearTimeout(timer); }, [removed]);
+  const boundary = store.settings.dayBoundaryHour;
+  const today = stockholmDate();
+  const filteredLogs = store.logs.filter(log => (!query || log.peptideName.toLocaleLowerCase("sv-SE").includes(query.toLocaleLowerCase("sv-SE"))) && (filter === "all" || log.status === filter)).sort((a, b) => b.takenAt.localeCompare(a.takenAt));
+  const logs = filteredLogs.slice(0, visibleCount);
+  const days: { date: string; logs: DoseLog[] }[] = [];
+  for (const log of logs) {
+    const date = logScheduledDate(log, boundary);
+    const day = days.find(value => value.date === date);
+    if (day) day.logs.push(log); else days.push({ date, logs: [log] });
+  }
+  const showNotes = filter === "all" && !query;
+  const remove = (log: DoseLog) => {
+    update(s => deleteDoseLog(s, log.id));
+    setRemoved(log);
+  };
+  const undoRemove = () => { if (removed) update(s => restoreDoseLog(s, removed)); setRemoved(null); };
+  return <>
+    <PageHeader title="Logg" action={<><HeaderButton label="Öppna kalendern" onClick={openCalendar}><CalendarDays/></HeaderButton>{headerAction}</>}/>
+    <div className="relative mb-3"><Search className="pointer-events-none absolute left-3 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground"/><Input type="search" value={query} onChange={event => { setQuery(event.target.value); setVisibleCount(60); }} placeholder="Sök peptid" className="h-10 rounded-[10px] border-0 bg-secondary/80 pl-9 text-[17px] dark:bg-secondary"/></div>
+    <div className="mb-6"><SegmentedControl label="Visa" value={filter} onChange={value => { setFilter(value); setVisibleCount(60); }} values={[{ value: "all", label: "Alla" }, { value: "taken", label: "Tagna" }, { value: "skipped", label: "Överhoppade" }]}/></div>
+    {days.length === 0 ? <Card className="px-6 py-10 text-center"><span className="mx-auto grid size-14 place-items-center rounded-full bg-secondary text-muted-foreground"><History className="size-7"/></span><p className="mt-4 text-[17px] font-semibold">{store.logs.length ? "Inga träffar" : "Ingen historik ännu"}</p><p className="mt-1 text-[15px] text-muted-foreground">{store.logs.length ? "Prova ett annat namn eller filter." : "Doser du loggar på Idag visas här."}</p></Card> : days.map(day => {
+      const note = showNotes ? store.dailyNotes.find(value => value.date === day.date) : undefined;
+      return <section key={day.date} className="mb-6">
+        <h2 className="mb-1.5 px-4 text-[13px] uppercase tracking-[.02em] text-muted-foreground">{dayHeading(day.date, today)}</h2>
+        <div className="overflow-hidden rounded-[14px] bg-card [&>*+*]:border-t [&>*+*]:border-border/80">
+          {note && hasWellbeingData(note) && <div className="flex items-center gap-3 px-4 py-3"><IconTile className="bg-rose-500"><Heart/></IconTile><span className="min-w-0 flex-1"><span className="block text-[17px]">Mående</span><span className="mt-0.5 block text-[13px] leading-[18px] text-muted-foreground">{[...wellbeingScales.filter(scale => note[scale.key] !== undefined).map(scale => `${scale.short} ${note[scale.key]}/5`), ...note.tags.map(tagLabel)].join(" · ") || note.note}</span></span></div>}
+          {day.logs.map(log => {
+            const takenDate = stockholmDate(log.takenAt);
+            return <SwipeRow key={log.id} label={`${log.peptideName}, ${log.status === "taken" ? "tagen" : "överhoppad"}. Tryck för att redigera.`} onTap={() => setEdit({ ...log, scheduledDate: day.date })} actions={[{ label: "Redigera", className: "bg-[#8e8e93]", onClick: () => setEdit({ ...log, scheduledDate: day.date }) }, { label: "Ta bort", className: "bg-destructive", onClick: () => remove(log) }]}>
+              <span className={`grid size-8 shrink-0 place-items-center rounded-full ${log.status === "taken" ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"}`}>{log.status === "taken" ? <Check className="size-4" strokeWidth={3}/> : <X className="size-4" strokeWidth={2.6}/>}</span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-[17px]">{log.peptideName}</span><span className="mt-0.5 block truncate text-[13px] text-muted-foreground">{log.status === "taken" ? `${n(log.actualDose)} ${log.unit} · ${n(log.computedIu)} IU${log.site ? ` · ${log.site}` : ""}` : "Överhoppad"}{takenDate !== day.date ? ` · loggad ${displayLogDate(takenDate, { day: "numeric", month: "short" })}` : ""}</span></span>
+              <span className="shrink-0 text-[15px] tabular-nums text-muted-foreground">{clock(log.takenAt)}</span>
+            </SwipeRow>;
+          })}
+        </div>
+      </section>;
+    })}
+    {filteredLogs.length > logs.length && <Button variant="secondary" className="mb-6 h-11 w-full" onClick={() => setVisibleCount(count => count + 60)}>Visa fler</Button>}
+    {days.length > 0 && <p className="mb-4 text-center text-[13px] text-muted-foreground">Svep åt vänster på en rad för att redigera eller ta bort.</p>}
+    {removed && <Toast message={`${removed.peptideName} togs bort`} actionLabel="Ångra" onAction={undoRemove}/>}
+    <Dialog open={!!edit} onOpenChange={open => !open && setEdit(null)}><DialogContent showCloseButton={false} className="max-h-[92dvh] overflow-y-auto bg-background">
+      <SheetBar title="Redigera logg" onCancel={() => setEdit(null)} doneLabel="Spara" doneDisabled={!edit || !Number.isFinite(edit.actualDose) || edit.actualDose < 0} onDone={() => { if (edit) update(s => replaceDoseLog(s, edit)); setEdit(null); }}/>
+      <DialogHeader><DialogTitle className="text-[22px]">{edit?.peptideName}</DialogTitle><DialogDescription>{edit?.status === "skipped" ? "Överhoppad dos" : "Tagen dos"}</DialogDescription></DialogHeader>
+      <div className="overflow-hidden rounded-[14px] bg-card [&>*+*]:border-t [&>*+*]:border-border/80">
+        <FormRow label="Dos">{edit && <span className="flex items-center justify-end gap-1"><Input min="0" step="any" type="number" inputMode="decimal" className={formInput} value={edit.actualDose} onChange={e => setEdit(v => v ? { ...v, actualDose: Number(e.target.value) } : v)}/><span className="text-[17px] text-muted-foreground">{edit.unit}</span></span>}</FormRow>
+        <FormRow label="Tid"><Input type="datetime-local" className={`${formInput} w-auto`} value={edit ? stockholmDateTimeInput(edit.takenAt) : ""} onChange={e => { if (e.target.value) setEdit(v => v ? { ...v, takenAt: stockholmLocalToIso(e.target.value) } : v); }}/></FormRow>
+        <FormRow label="Hör till dag"><Input type="date" className={`${formInput} w-auto`} value={edit?.scheduledDate ?? ""} onChange={e => { if (e.target.value) setEdit(v => v ? { ...v, scheduledDate: e.target.value } : v); }}/></FormRow>
+      </div>
+      <Textarea className="resize-none border-0 bg-card text-[17px]" value={edit?.note ?? ""} onChange={e => setEdit(v => v ? { ...v, note: e.target.value } : v)} placeholder="Anteckning"/>
+      <div className="overflow-hidden rounded-[14px] bg-card"><ListRow title={<span className="block text-center">Ta bort logg</span>} destructive onClick={() => { if (edit) { const original = store.logs.find(log => log.id === edit.id); if (original) remove(original); } setEdit(null); }}/></div>
+      <p className="-mt-2 px-4 text-[13px] text-muted-foreground">Dosen läggs tillbaka i vialens lager när loggen tas bort.</p>
+    </DialogContent></Dialog>
   </>;
 }
 
 const emptyPeptide: Omit<Peptide,"id"> = { name:"",shortCode:"",color:"teal",doseMcg:100,vialMg:10,waterMl:2,remainingMg:10,route:"subcutaneous",slot:"evening",time:"21:00",frequency:"daily",weekdays:[0,1,2,3,4,5,6],paused:false,fasted:false,fastedNote:"",beyondUseDays:28,sites:[...defaultInjectionSites],notes:"",archived:false,example:false };
+const routeNames: Record<Peptide["route"], string> = { subcutaneous: "Subkutan", intranasal: "Intranasal", oral: "Oral", topical: "Topikal" };
+const formInput = "h-11 min-w-0 rounded-none border-0 bg-transparent px-0 text-right text-[17px] shadow-none focus-visible:ring-0 dark:bg-transparent";
+const formSelect = "h-11 w-full min-w-0 appearance-none bg-transparent text-right text-[17px] text-muted-foreground outline-none [text-align-last:right]";
 
-function DecimalInput({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+function FormRow({ label, children, htmlFor }: { label: string; children: React.ReactNode; htmlFor?: string }) {
+  return <div className="flex min-h-12 items-center gap-3 px-4"><label htmlFor={htmlFor} className="shrink-0 text-[17px]">{label}</label><div className="flex min-w-0 flex-1 justify-end">{children}</div></div>;
+}
+function FormGroup({ title, footer, children }: { title?: string; footer?: React.ReactNode; children: React.ReactNode }) {
+  return <div>{title && <p className="mb-1.5 px-4 text-[13px] uppercase tracking-[.02em] text-muted-foreground">{title}</p>}<div className="overflow-hidden rounded-[14px] bg-card [&>*+*]:border-t [&>*+*]:border-border/80">{children}</div>{footer && <div className="mt-1.5 px-4 text-[13px] leading-[18px] text-muted-foreground">{footer}</div>}</div>;
+}
+
+function DecimalInput({ value, onChange, className, id, suffix }: { value: number; onChange: (value: number) => void; className?: string; id?: string; suffix?: string }) {
   const [editingValue, setEditingValue] = useState<string | null>(null);
-  return <Input
-    className="mt-1.5 h-11"
+  return <span className="flex min-w-0 items-center justify-end gap-1"><Input
+    id={id}
+    className={className ?? formInput}
     type="text"
     inputMode="decimal"
     autoComplete="off"
@@ -569,34 +772,172 @@ function DecimalInput({ value, onChange }: { value: number; onChange: (value: nu
       onChange(input && Number.isFinite(parsed) ? parsed : 0);
     }}
     onBlur={() => setEditingValue(null)}
-  />;
+  />{suffix && <span className="shrink-0 text-[17px] text-muted-foreground">{suffix}</span>}</span>;
 }
 
 function ScheduleFields({ value, set }: { value: Schedule; set: (part: Partial<Schedule>) => void }) {
-  const weekdayNames=["Mån","Tis","Ons","Tor","Fre","Lör","Sön"];
-  return <div className="space-y-4 rounded-2xl border border-border p-4">
-    <div className="flex items-center justify-between"><div><p className="font-medium">Schema</p><p className="mt-1 text-xs text-muted-foreground">Visas på Idag när schemat gäller.</p></div><label className="flex items-center gap-2 text-sm">Pausad <Switch checked={value.paused} onCheckedChange={paused=>set({paused})}/></label></div>
-    <label className="block text-xs text-muted-foreground">Frekvens<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3 text-base" value={value.frequency} onChange={e=>{const frequency=e.target.value as Schedule["frequency"];set({frequency,slot:frequency==="as_needed"?"as_needed":value.slot==="as_needed"?"evening":value.slot})}}><option value="daily">Varje dag</option><option value="weekdays">Valda veckodagar</option><option value="every_n_days">Var N:e dag</option><option value="as_needed">Vid behov</option></select></label>
-    {value.frequency==="weekdays"&&<div className="flex flex-wrap gap-1.5">{weekdayNames.map((label,index)=><button type="button" key={label} onClick={()=>set({weekdays:value.weekdays.includes(index)?value.weekdays.filter(day=>day!==index):[...value.weekdays,index].sort()})} className={`min-h-9 rounded-full border px-3 text-xs ${value.weekdays.includes(index)?"border-primary bg-accent text-accent-foreground":"border-border text-muted-foreground"}`}>{label}</button>)}</div>}
-    {value.frequency==="every_n_days"&&<div className="grid grid-cols-2 gap-3"><label className="text-xs text-muted-foreground">Var N:e dag<Input min={2} className="mt-1.5 h-11" type="number" value={value.everyNDays??2} onChange={e=>set({everyNDays:Math.max(2,Number(e.target.value))})}/></label><label className="text-xs text-muted-foreground">Startdatum<Input className="mt-1.5 h-11" type="date" value={value.anchorDate??""} onChange={e=>set({anchorDate:e.target.value||undefined})}/></label></div>}
-    {value.frequency!=="as_needed"&&<div className="grid grid-cols-2 gap-3"><label className="text-xs text-muted-foreground">Tidsdel<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3 text-base" value={value.slot} onChange={e=>set({slot:e.target.value as Slot})}>{Object.entries(slotNames).filter(([key])=>key!=="as_needed").map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label className="text-xs text-muted-foreground">Klockslag<Input className="mt-1.5 h-11" type="time" value={value.time} onChange={e=>set({time:e.target.value})}/></label></div>}
-    <details><summary className="min-h-11 cursor-pointer py-3 text-sm">Cykel <span className="text-muted-foreground">(valfritt)</span></summary><div className="grid grid-cols-3 gap-2"><label className="col-span-3 text-xs text-muted-foreground">Startdatum<Input className="mt-1.5 h-11" type="date" value={value.cycleStart??""} onChange={e=>set({cycleStart:e.target.value||undefined})}/></label><label className="text-xs text-muted-foreground">Veckor på<Input min={1} className="mt-1.5 h-11" type="number" value={value.weeksOn??""} onChange={e=>set({weeksOn:e.target.value?Number(e.target.value):undefined})}/></label><label className="text-xs text-muted-foreground">Veckor av<Input min={0} className="mt-1.5 h-11" type="number" value={value.weeksOff??""} onChange={e=>set({weeksOff:e.target.value?Number(e.target.value):undefined})}/></label></div></details>
-  </div>;
+  const weekdayNames = ["M", "T", "O", "T", "F", "L", "S"];
+  const weekdayLabels = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
+  return <FormGroup title="Schema" footer={value.paused ? "Pausad: visas inte på Idag och ger inga påminnelser." : "Visas på Idag de dagar schemat gäller."}>
+    <FormRow label="Upprepa"><select className={formSelect} value={value.frequency} onChange={e => { const frequency = e.target.value as Schedule["frequency"]; set({ frequency, slot: frequency === "as_needed" ? "as_needed" : value.slot === "as_needed" ? "evening" : value.slot }); }}><option value="daily">Varje dag</option><option value="weekdays">Vissa veckodagar</option><option value="every_n_days">Var N:e dag</option><option value="as_needed">Vid behov</option></select></FormRow>
+    {value.frequency === "weekdays" && <div className="flex justify-between gap-1 px-4 py-3">{weekdayNames.map((label, index) => <button type="button" key={index} aria-label={weekdayLabels[index]} aria-pressed={value.weekdays.includes(index)} onClick={() => set({ weekdays: value.weekdays.includes(index) ? value.weekdays.filter(day => day !== index) : [...value.weekdays, index].sort() })} className={`grid size-10 place-items-center rounded-full text-[15px] font-medium transition-colors ${value.weekdays.includes(index) ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground/80"}`}>{label}</button>)}</div>}
+    {value.frequency === "every_n_days" && <><FormRow label="Var N:e dag"><Input min={2} className={formInput} type="number" inputMode="numeric" value={value.everyNDays ?? 2} onChange={e => set({ everyNDays: Math.max(2, Number(e.target.value)) })}/></FormRow><FormRow label="Från"><Input className={`${formInput} w-auto`} type="date" value={value.anchorDate ?? ""} onChange={e => set({ anchorDate: e.target.value || undefined })}/></FormRow></>}
+    {value.frequency !== "as_needed" && <><FormRow label="Tid på dagen"><select className={formSelect} value={value.slot} onChange={e => set({ slot: e.target.value as Slot })}>{Object.entries(slotNames).filter(([key]) => key !== "as_needed").map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></FormRow><FormRow label="Klockslag"><Input className={`${formInput} w-auto`} type="time" value={value.time} onChange={e => set({ time: e.target.value })}/></FormRow></>}
+    <FormRow label="Pausad"><Switch checked={value.paused} onCheckedChange={paused => set({ paused })}/></FormRow>
+    <details className="group"><summary className="flex min-h-12 cursor-pointer list-none items-center justify-between px-4 text-[17px] [&::-webkit-details-marker]:hidden">Cykel<span className="flex items-center gap-1 text-muted-foreground">{value.cycleStart && value.weeksOn ? `${value.weeksOn} v på / ${value.weeksOff ?? 0} v av` : "Av"}<ChevronRight className="size-5 text-muted-foreground/50 transition-transform group-open:rotate-90"/></span></summary><div className="border-t border-border/80"><FormRow label="Start"><Input className={`${formInput} w-auto`} type="date" value={value.cycleStart ?? ""} onChange={e => set({ cycleStart: e.target.value || undefined })}/></FormRow><FormRow label="Veckor på"><Input min={1} className={formInput} type="number" inputMode="numeric" value={value.weeksOn ?? ""} onChange={e => set({ weeksOn: e.target.value ? Number(e.target.value) : undefined })}/></FormRow><FormRow label="Veckor av"><Input min={0} className={formInput} type="number" inputMode="numeric" value={value.weeksOff ?? ""} onChange={e => set({ weeksOff: e.target.value ? Number(e.target.value) : undefined })}/></FormRow></div></details>
+  </FormGroup>;
 }
 
-function PeptidesView({ store, update, openPlanner, openSchedules, openInsights }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; openPlanner: () => void; openSchedules: () => void; openInsights: (id: string) => void }) {
-  const [editing,setEditing]=useState<Peptide|null>(null); const [editingGroup,setEditingGroup]=useState<MixGroupSchedule|null>(null); const [adding,setAdding]=useState(false); const active=store.peptides.filter(p=>!p.archived); const draft=editing??({...emptyPeptide,id:""} as Peptide); const validAmounts=draft.doseMcg>0&&draft.vialMg>0&&draft.waterMl>0; const units=validAmounts?syringeUnits(draft.doseMcg,draft.vialMg,draft.waterMl):0; const set=(part:Partial<Peptide>)=>setEditing({...draft,...part});
-  const existingGroups = [...new Map([...store.mixGroups.map(group=>group.name),...store.peptides.flatMap(peptide=>peptide.mixGroupId?[peptide.mixGroupId]:[])].map(name=>[groupKey(name),name])).values()];
-  const groupForDraft=store.mixGroups.find(group=>groupKey(group.name)===groupKey(draft.mixGroupId));
-  const save=()=>{const typedGroup=draft.mixGroupId?.trim();const canonicalGroup=existingGroups.find(group=>groupKey(group)===groupKey(typedGroup))??typedGroup;const previous=store.peptides.find(peptide=>peptide.id===draft.id);const preparationChanged=Boolean(previous&&(previous.vialMg!==draft.vialMg||previous.waterMl!==draft.waterMl));const item={...draft,id:draft.id||uid(),shortCode:draft.shortCode||draft.name.slice(0,3),currentVialId:preparationChanged?uid():draft.currentVialId,remainingMg:preparationChanged?0:draft.id?draft.remainingMg:draft.vialMg,mixGroupId:canonicalGroup||undefined};update(s=>{const hasGroup=canonicalGroup&&s.mixGroups.some(group=>groupKey(group.name)===groupKey(canonicalGroup));const mixGroups=canonicalGroup&&!hasGroup?[...s.mixGroups,{name:canonicalGroup,...peptideSchedule(item)}]:s.mixGroups;return {...s,mixGroups,peptides:draft.id?s.peptides.map(p=>p.id===draft.id?item:p):[...s.peptides,item]}});setEditing(null);setAdding(false)};
-  const addToday=(peptide:Peptide)=>{const date=stockholmDate();const key=`${date}:${scheduleTargetKey(peptide)}`;update(s=>({...s,todayAdditions:[...new Set([...s.todayAdditions,key])]}))};
-  return <><PageHeader eyebrow="Dina ämnen" title="Peptider" action={<div className="flex gap-2"><Button size="icon" variant="outline" className="size-11 rounded-full" onClick={openSchedules} aria-label="Öppna scheman"><CalendarDays/></Button><Button size="icon" variant="outline" className="size-11 rounded-full" onClick={openPlanner} aria-label="Öppna inköpsplan"><ShoppingCart/></Button><Button size="icon" className="size-11 rounded-full" onClick={()=>{setEditing({...emptyPeptide,id:""} as Peptide);setAdding(true)}} aria-label="Lägg till peptid"><Plus/></Button></div>}/>{active.length===0?<Card className="p-7 text-center"><FlaskConical className="mx-auto size-7 text-muted-foreground"/><p className="mt-4 font-medium">Inga peptider ännu</p><Button className="mt-5 h-11 rounded-xl" onClick={()=>{setEditing({...emptyPeptide,id:""} as Peptide);setAdding(true)}}>Lägg till peptid</Button></Card>:<div className="space-y-3">{active.map(p=>{const schedule=resolvedSchedule(p,store.mixGroups);const days=vialDaysLeft(p);const inventoryDays=inventoryDaysLeft(p,store);return <Card key={p.id} className="flex min-h-[84px] items-center gap-2 p-3"><button onClick={()=>setEditing(p)} className="flex min-h-[60px] min-w-0 flex-1 items-center gap-4 text-left"><ChemicalBadge items={[p]}/><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate font-medium">{p.name}</p>{p.example&&<span className="rounded bg-muted px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground">Exempel</span>}</div><p className="mt-1 truncate text-sm text-muted-foreground">{n(p.doseMcg)} mcg · {n(syringeUnits(p.doseMcg,p.vialMg,p.waterMl))} IU · {schedule.paused?"Pausad":schedule.frequency==="as_needed"?"Vid behov":`${slotNames[schedule.slot]} ${schedule.time}`}</p>{inventoryDays!==null&&inventoryDays<=15?<p className="mt-1 flex items-center gap-1 font-medium text-amber-700 dark:text-amber-200"><TriangleAlert className="size-3.5"/><span className="text-xs">Lågt lager · {inventoryDays===0?"slut":`ca ${inventoryDays} dagar kvar`}</span></p>:days!==null&&<p className={`mt-1 font-mono text-[10px] ${days<=0?"text-destructive":"text-muted-foreground"}`}>{days>0?`Vial · ${days} d kvar enligt din gräns`:"Vial · angiven gräns passerad"}</p>}</div><ChevronRight className="size-5 shrink-0 text-muted-foreground"/></button><Button variant="ghost" size="icon" className="size-11 shrink-0" onClick={()=>openInsights(p.id)} aria-label={`Visa kurvor för ${p.name}`}><BarChart3/></Button>{schedule.frequency==="as_needed"&&!schedule.paused&&<Button variant="outline" className="h-11 shrink-0 px-3 text-xs" onClick={()=>addToday(p)}>Lägg till idag</Button>}</Card>})}</div>}
-    <Dialog open={!!editing} onOpenChange={open=>{if(!open){setEditing(null);setAdding(false)}}}><DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>{adding?"Lägg till peptid":"Peptidinställningar"}</DialogTitle><DialogDescription>Alla värden är dina egna logguppgifter.</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><label className="col-span-2 text-xs text-muted-foreground">Namn<Input className="mt-1.5 h-11" value={draft.name} onChange={e=>set({name:e.target.value})} placeholder="Fritextnamn"/></label><label className="text-xs text-muted-foreground">Kortkod<Input className="mt-1.5 h-11 uppercase" maxLength={4} value={draft.shortCode} onChange={e=>set({shortCode:e.target.value.toLocaleUpperCase("sv-SE")})}/></label><label className="text-xs text-muted-foreground">Dos (mcg)<DecimalInput value={draft.doseMcg} onChange={doseMcg=>set({doseMcg})}/></label><div className="col-span-2"><p className="text-xs text-muted-foreground">Accentfärg</p><div className="mt-2 flex gap-2">{Object.entries(compoundColors).map(([color,value])=><button key={color} type="button" aria-label={compoundColorLabels[color]} aria-pressed={draft.color===color} onClick={()=>set({color})} style={{backgroundColor:value}} className={`size-11 rounded-full border-2 ${draft.color===color?"border-foreground":"border-transparent"}`}/>)}</div></div><label className="text-xs text-muted-foreground">Vial (mg)<DecimalInput value={draft.vialMg} onChange={vialMg=>set({vialMg})}/></label><label className="text-xs text-muted-foreground">BAC-vatten (ml)<DecimalInput value={draft.waterMl} onChange={waterMl=>set({waterMl})}/></label><label className="text-xs text-muted-foreground">Administrering<select className="mt-1.5 h-11 w-full rounded-lg border bg-background px-3 text-base" value={draft.route} onChange={e=>set({route:e.target.value as Peptide["route"]})}><option value="subcutaneous">Subkutan</option><option value="intranasal">Intranasal</option><option value="oral">Oral</option><option value="topical">Topikal</option></select></label><div className="text-xs text-muted-foreground"><label>Mixgrupp<Input className="mt-1.5 h-11" value={draft.mixGroupId??""} onChange={e=>set({mixGroupId:e.target.value||undefined})} placeholder="Valfritt"/></label>{existingGroups.length>0&&<div className="mt-2 flex flex-wrap gap-1.5">{existingGroups.map(group=><button type="button" key={group} onClick={()=>set({mixGroupId:group})} className={`min-h-8 rounded-full border px-2.5 text-[11px] ${groupKey(draft.mixGroupId)===groupKey(group)?"border-primary bg-accent text-accent-foreground":"border-border text-muted-foreground"}`}>{group}</button>)}</div>}</div></div><div className="rounded-2xl bg-muted p-4"><p className="text-xs text-muted-foreground">Automatisk vialmatematik</p>{validAmounts?<><p className="mt-2 text-lg font-medium tabular-nums">{n(draft.vialMg/draft.waterMl)} mg/ml · {n((draft.vialMg/draft.waterMl)*10)} mcg/IU</p><p className="mt-1 text-sm text-accent-foreground">{n(draft.doseMcg)} mcg = {n(units)} IU</p></>:<p className="mt-2 text-sm text-muted-foreground">Fyll i dos, vial och BAC-vatten för att se uträkningen.</p>}</div>{draft.mixGroupId?<div className="rounded-2xl border border-border p-4"><p className="text-sm">Schemat styrs av mixgruppen {draft.mixGroupId}</p><Button type="button" variant="outline" className="mt-3 h-11 w-full" onClick={()=>setEditingGroup(groupForDraft??{name:draft.mixGroupId!,...peptideSchedule(draft)})}>Redigera gruppens schema</Button></div>:<ScheduleFields value={peptideSchedule(draft)} set={part=>set(part)}/>}<label className="flex min-h-12 items-center justify-between"><span className="text-sm">Fastande flagga</span><Switch checked={draft.fasted} onCheckedChange={v=>set({fasted:v})}/></label><label className="text-xs text-muted-foreground">Peptidanteckning<Textarea className="mt-1.5" value={draft.notes} onChange={e=>set({notes:e.target.value})} placeholder="Rekonstituering, egen påminnelse…"/></label><Button disabled={!draft.name.trim()||!validAmounts} className="h-12" onClick={save}>Spara peptid</Button>{draft.id&&<><Button variant="outline" className="h-11" onClick={()=>set({currentVialId:uid(),remainingMg:draft.vialMg,reconstitutedAt:new Date().toISOString()})}><RotateCcw/> Öppnade ny vial</Button><Button variant="ghost" className="h-11 text-muted-foreground" onClick={()=>{update(s=>({...s,peptides:s.peptides.map(p=>p.id===draft.id?{...p,archived:true}:p)}));setEditing(null)}}><Archive/> Arkivera</Button></>}</DialogContent></Dialog>
-    <Dialog open={!!editingGroup} onOpenChange={open=>!open&&setEditingGroup(null)}><DialogContent className="max-h-[88dvh] overflow-y-auto"><DialogHeader><DialogTitle>Mixgrupp {editingGroup?.name}</DialogTitle><DialogDescription>Ett schema och en Ta dos för hela gruppen.</DialogDescription></DialogHeader>{editingGroup&&<ScheduleFields value={editingGroup} set={part=>setEditingGroup({...editingGroup,...part})}/>}<Button className="h-12" onClick={()=>{if(editingGroup)update(s=>({...s,mixGroups:[...s.mixGroups.filter(group=>groupKey(group.name)!==groupKey(editingGroup.name)),editingGroup]}));setEditingGroup(null)}}>Spara gruppschema</Button></DialogContent></Dialog>
+function scheduleText(peptide: Peptide, store: PeptimeStore) {
+  const schedule = resolvedSchedule(peptide, store.mixGroups);
+  if (schedule.paused) return "Pausad";
+  if (schedule.frequency === "as_needed") return "Vid behov";
+  const days = schedule.frequency === "daily" ? "Varje dag" : schedule.frequency === "every_n_days" ? `Var ${schedule.everyNDays ?? 2}:e dag` : schedule.weekdays.length === 7 ? "Varje dag" : schedule.weekdays.map(day => ["mån", "tis", "ons", "tor", "fre", "lör", "sön"][day]).join(", ");
+  return `${days} · ${schedule.time}`;
+}
+
+function StockBar({ peptide, store }: { peptide: Peptide; store: PeptimeStore }) {
+  const fraction = peptide.vialMg > 0 ? Math.max(0, Math.min(1, peptide.remainingMg / peptide.vialMg)) : 0;
+  const days = inventoryDaysLeft(peptide, store);
+  const low = (days !== null && days <= 15) || fraction < .15;
+  return <span className="mt-1.5 flex items-center gap-2"><span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-secondary"><span className={`block h-full rounded-full ${low ? "bg-amber-500" : "bg-primary"}`} style={{ width: `${Math.max(fraction * 100, fraction > 0 ? 4 : 0)}%` }}/></span><span className={`truncate text-[13px] ${low ? "font-medium text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>{Math.round(fraction * 100)} % kvar{days !== null ? ` · ${days === 0 ? "slut" : `ca ${days} d`}` : ""}</span></span>;
+}
+
+function PeptideEditor({ peptide, adding, store, update, onClose }: { peptide: Peptide | null; adding: boolean; store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; onClose: () => void }) {
+  const [draftState, setDraft] = useState<Peptide | null>(peptide);
+  const [editingGroup, setEditingGroup] = useState<MixGroupSchedule | null>(null);
+  const draft = draftState ?? ({ ...emptyPeptide, id: "" } as Peptide);
+  const set = (part: Partial<Peptide>) => setDraft({ ...draft, ...part });
+  const validAmounts = draft.doseMcg > 0 && draft.vialMg > 0 && draft.waterMl > 0;
+  const units = validAmounts ? syringeUnits(draft.doseMcg, draft.vialMg, draft.waterMl) : 0;
+  const existingGroups = [...new Map([...store.mixGroups.map(group => group.name), ...store.peptides.flatMap(item => item.mixGroupId ? [item.mixGroupId] : [])].map(name => [groupKey(name), name])).values()];
+  const groupForDraft = store.mixGroups.find(group => groupKey(group.name) === groupKey(draft.mixGroupId));
+  const save = () => {
+    const typedGroup = draft.mixGroupId?.trim();
+    const canonicalGroup = existingGroups.find(group => groupKey(group) === groupKey(typedGroup)) ?? typedGroup;
+    const previous = store.peptides.find(item => item.id === draft.id);
+    const preparationChanged = Boolean(previous && (previous.vialMg !== draft.vialMg || previous.waterMl !== draft.waterMl));
+    const item = { ...draft, id: draft.id || uid(), shortCode: draft.shortCode || draft.name.slice(0, 3), currentVialId: preparationChanged ? uid() : draft.currentVialId, remainingMg: preparationChanged ? 0 : draft.id ? draft.remainingMg : draft.vialMg, mixGroupId: canonicalGroup || undefined };
+    update(s => { const hasGroup = canonicalGroup && s.mixGroups.some(group => groupKey(group.name) === groupKey(canonicalGroup)); const mixGroups = canonicalGroup && !hasGroup ? [...s.mixGroups, { name: canonicalGroup, ...peptideSchedule(item) }] : s.mixGroups; return { ...s, mixGroups, peptides: draft.id ? s.peptides.map(p => p.id === draft.id ? item : p) : [...s.peptides, item] }; });
+    onClose();
+  };
+  return <>
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent showCloseButton={false} className="max-h-[94dvh] gap-6 overflow-y-auto bg-background sm:max-w-lg">
+      <SheetBar title={adding ? "Ny peptid" : "Redigera"} onCancel={onClose} doneLabel={adding ? "Lägg till" : "Spara"} doneDisabled={!draft.name.trim() || !validAmounts} onDone={save}/>
+      <DialogHeader className="sr-only"><DialogTitle>{adding ? "Ny peptid" : "Redigera peptid"}</DialogTitle><DialogDescription>Alla värden är dina egna logguppgifter.</DialogDescription></DialogHeader>
+      <FormGroup>
+        <div className="px-4"><Input aria-label="Namn" className="h-12 rounded-none border-0 bg-transparent px-0 text-[17px] shadow-none focus-visible:ring-0 dark:bg-transparent" value={draft.name} onChange={e => set({ name: e.target.value })} placeholder="Namn, t.ex. BPC-157" autoFocus={adding}/></div>
+        <FormRow label="Dos"><DecimalInput value={draft.doseMcg} onChange={doseMcg => set({ doseMcg })} suffix="mcg"/></FormRow>
+        <FormRow label="Administrering"><select className={formSelect} value={draft.route} onChange={e => set({ route: e.target.value as Peptide["route"] })}>{Object.entries(routeNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormRow>
+        <FormRow label="Tas fastande"><Switch checked={draft.fasted} onCheckedChange={fasted => set({ fasted })}/></FormRow>
+      </FormGroup>
+      <FormGroup title="Beredning" footer={validAmounts ? <span className="tabular-nums"><strong className="font-semibold text-foreground">{n(draft.doseMcg)} mcg = {n(units)} IU</strong> · {n(draft.vialMg / draft.waterMl)} mg/ml · {n((draft.vialMg / draft.waterMl) * 10)} mcg per IU</span> : "Fyll i dos, vial och BAC-vatten så räknas enheterna ut."}>
+        <FormRow label="Vial"><DecimalInput value={draft.vialMg} onChange={vialMg => set({ vialMg })} suffix="mg"/></FormRow>
+        <FormRow label="BAC-vatten"><DecimalInput value={draft.waterMl} onChange={waterMl => set({ waterMl })} suffix="ml"/></FormRow>
+      </FormGroup>
+      {draft.mixGroupId
+        ? <FormGroup title="Schema" footer={`Schemat delas av alla i mixgruppen ${draft.mixGroupId}.`}><ListRow title="Gruppens schema" value={groupForDraft ? scheduleText({ ...draft, ...groupForDraft }, store) : undefined} chevron onClick={() => setEditingGroup(groupForDraft ?? { name: draft.mixGroupId!, ...peptideSchedule(draft) })}/></FormGroup>
+        : <ScheduleFields value={peptideSchedule(draft)} set={part => set(part)}/>}
+      <details className="group">
+        <summary className="mb-1.5 flex cursor-pointer list-none items-center gap-1 px-4 text-[13px] uppercase tracking-[.02em] text-muted-foreground [&::-webkit-details-marker]:hidden">Avancerat<ChevronRight className="size-4 transition-transform group-open:rotate-90"/></summary>
+        <div className="space-y-6">
+          <FormGroup footer="Kortkoden och färgen visas i listor och på Idag.">
+            <FormRow label="Kortkod"><Input className={`${formInput} uppercase`} maxLength={4} value={draft.shortCode} placeholder={draft.name.slice(0, 3).toLocaleUpperCase("sv-SE")} onChange={e => set({ shortCode: e.target.value.toLocaleUpperCase("sv-SE") })}/></FormRow>
+            <div className="flex min-h-12 items-center justify-between gap-3 px-4"><span className="text-[17px]">Färg</span><span className="flex gap-2">{Object.entries(compoundColors).map(([color, value]) => <button key={color} type="button" aria-label={compoundColorLabels[color]} aria-pressed={draft.color === color} onClick={() => set({ color })} style={{ backgroundColor: value }} className={`size-7 rounded-full ring-offset-2 ring-offset-card ${draft.color === color ? "ring-2 ring-foreground" : ""}`}/>)}</span></div>
+          </FormGroup>
+          <FormGroup footer={existingGroups.length ? <span className="flex flex-wrap gap-1.5 pt-1">{existingGroups.map(group => <button type="button" key={group} onClick={() => set({ mixGroupId: group })} className={`min-h-8 rounded-full px-3 text-[13px] ${groupKey(draft.mixGroupId) === groupKey(group) ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground/80"}`}>{group}</button>)}</span> : "Peptider i samma mixgrupp dras upp i samma spruta och delar schema."}>
+            <FormRow label="Mixgrupp"><Input className={formInput} value={draft.mixGroupId ?? ""} onChange={e => set({ mixGroupId: e.target.value || undefined })} placeholder="Ingen"/></FormRow>
+          </FormGroup>
+          <Textarea className="resize-none border-0 bg-card text-[17px]" value={draft.notes} onChange={e => set({ notes: e.target.value })} placeholder="Anteckning, t.ex. rekonstituering"/>
+        </div>
+      </details>
+    </DialogContent></Dialog>
+    <Dialog open={!!editingGroup} onOpenChange={open => !open && setEditingGroup(null)}><DialogContent showCloseButton={false} className="max-h-[92dvh] gap-6 overflow-y-auto bg-background">
+      <SheetBar title={`Mixgrupp ${editingGroup?.name ?? ""}`} onCancel={() => setEditingGroup(null)} doneLabel="Spara" onDone={() => { if (editingGroup) update(s => ({ ...s, mixGroups: [...s.mixGroups.filter(group => groupKey(group.name) !== groupKey(editingGroup.name)), editingGroup] })); setEditingGroup(null); }}/>
+      <DialogHeader className="sr-only"><DialogTitle>Mixgrupp</DialogTitle><DialogDescription>Ett schema och en dos för hela gruppen.</DialogDescription></DialogHeader>
+      {editingGroup && <ScheduleFields value={editingGroup} set={part => setEditingGroup({ ...editingGroup, ...part })}/>}
+    </DialogContent></Dialog>
   </>;
 }
 
-function CalendarView({ store, update, onBack }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; onBack: () => void }) {
+function PeptidesView({ store, update, openPlanner, openSchedules, openPeptide, headerAction }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; openPlanner: () => void; openSchedules: () => void; openPeptide: (id: string) => void; headerAction: React.ReactNode }) {
+  const [adding, setAdding] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const active = store.peptides.filter(p => !p.archived);
+  const archived = store.peptides.filter(p => p.archived);
+  const examples = active.filter(p => p.example);
+  const addToday = (peptide: Peptide) => { haptic(); const key = `${stockholmDate()}:${scheduleTargetKey(peptide)}`; update(s => ({ ...s, todayAdditions: [...new Set([...s.todayAdditions, key])] })); };
+  const addedToday = (peptide: Peptide) => store.todayAdditions.includes(`${stockholmDate()}:${scheduleTargetKey(peptide)}`);
+  return <>
+    <PageHeader title="Peptider" action={<><HeaderButton label="Lägg till peptid" variant="filled" onClick={() => setAdding(true)}><Plus strokeWidth={2.6}/></HeaderButton>{headerAction}</>}/>
+    {examples.length > 0 && <Card className="mb-6 flex items-start gap-3 p-4"><Sparkles className="mt-0.5 size-5 shrink-0 text-primary"/><div className="min-w-0 flex-1"><p className="text-[15px] font-semibold">Exempel visas</p><p className="mt-0.5 text-[15px] leading-5 text-muted-foreground">{examples.length} exempelpeptider hjälper dig komma igång.</p><button type="button" onClick={() => update(s => ({ ...s, peptides: s.peptides.map(p => p.example && !p.archived ? { ...p, archived: true } : p) }))} className="mt-2 min-h-9 text-[15px] font-semibold text-primary">Ta bort exempel</button></div></Card>}
+    {active.length === 0 ? <Card className="mb-7 px-6 py-10 text-center"><span className="mx-auto grid size-14 place-items-center rounded-full bg-accent text-accent-foreground"><FlaskConical className="size-7"/></span><p className="mt-4 text-[17px] font-semibold">Inga peptider ännu</p><p className="mt-1 text-[15px] text-muted-foreground">Lägg till det du tar, så räknar Peptime ut enheterna.</p><Button className="mt-5 h-11 rounded-[12px]" onClick={() => setAdding(true)}><Plus/> Lägg till peptid</Button></Card>
+      : <ListSection>{active.map(p => {
+        const schedule = resolvedSchedule(p, store.mixGroups);
+        const asNeeded = schedule.frequency === "as_needed" && !schedule.paused;
+        return <div key={p.id} className="flex items-center gap-2 pr-3">
+          <button type="button" onClick={() => openPeptide(p.id)} className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 text-left transition-colors active:bg-muted">
+            <DoseBadge items={[p]}/>
+            <span className="min-w-0 flex-1"><span className="flex items-baseline justify-between gap-2"><span className="truncate text-[17px] font-semibold">{p.name}</span><span className="shrink-0 text-[15px] tabular-nums text-muted-foreground">{n(syringeUnits(p.doseMcg, p.vialMg, p.waterMl))} IU</span></span><span className="mt-0.5 block truncate text-[15px] text-muted-foreground">{scheduleText(p, store)}</span><StockBar peptide={p} store={store}/></span>
+          </button>
+          {asNeeded ? <button type="button" disabled={addedToday(p)} onClick={() => addToday(p)} className="min-h-8 shrink-0 rounded-full bg-secondary px-3 text-[13px] font-semibold text-primary disabled:text-muted-foreground">{addedToday(p) ? "Tillagd" : "+ Idag"}</button> : <ChevronRight className="size-5 shrink-0 text-muted-foreground/50" strokeWidth={2.4}/>}
+        </div>;
+      })}</ListSection>}
+    <ListSection title="Verktyg">
+      <ListRow icon={<ShoppingCart/>} iconClassName="bg-orange-500" title="Inköpsplanering" subtitle="Vialer och BAC för 30–60 dagar" chevron onClick={openPlanner}/>
+      <ListRow icon={<Share2/>} iconClassName="bg-blue-500" title="Dela och importera schema" subtitle="Bild, kod eller import från vän" chevron onClick={openSchedules}/>
+      {archived.length > 0 && <ListRow icon={<Archive/>} iconClassName="bg-[#8e8e93]" title="Arkiverade" value={archived.length} chevron onClick={() => setShowArchived(value => !value)}/>}
+    </ListSection>
+    {showArchived && archived.length > 0 && <ListSection title="Arkiverade" footer="Återställda peptider visas igen på Idag enligt sitt schema.">{archived.map(p => <ListRow key={p.id} title={p.name} subtitle={`${n(p.doseMcg)} mcg`} trailing={<button type="button" onClick={() => update(s => ({ ...s, peptides: s.peptides.map(item => item.id === p.id ? { ...item, archived: false } : item) }))} className="min-h-8 shrink-0 rounded-full bg-secondary px-3 text-[13px] font-semibold text-primary">Återställ</button>}/>)}</ListSection>}
+    {adding && <PeptideEditor peptide={null} adding store={store} update={update} onClose={() => setAdding(false)}/>}
+  </>;
+}
+
+function PeptideDetail({ store, update, peptide, onBack, openInsights }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; peptide: Peptide; onBack: () => void; openInsights: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const today = stockholmDate();
+  const schedule = resolvedSchedule(peptide, store.mixGroups);
+  const units = syringeUnits(peptide.doseMcg, peptide.vialMg, peptide.waterMl);
+  const fraction = peptide.vialMg > 0 ? Math.max(0, Math.min(1, peptide.remainingMg / peptide.vialMg)) : 0;
+  const days = inventoryDaysLeft(peptide, store);
+  const vialDays = vialDaysLeft(peptide);
+  const low = (days !== null && days <= 15) || fraction < .15;
+  const since = addDays(today, -29);
+  const recent = store.logs.filter(log => log.peptideId === peptide.id && logScheduledDate(log, store.settings.dayBoundaryHour) >= since);
+  const latest = [...store.logs.filter(log => log.peptideId === peptide.id && log.status === "taken")].sort((a, b) => b.takenAt.localeCompare(a.takenAt))[0];
+  const asNeeded = schedule.frequency === "as_needed" && !schedule.paused;
+  const todayKey = `${today}:${scheduleTargetKey(peptide)}`;
+  const set = (part: Partial<Peptide>) => update(s => ({ ...s, peptides: s.peptides.map(item => item.id === peptide.id ? { ...item, ...part } : item) }));
+  return <>
+    <PageHeader title={peptide.name} back={{ label: "Peptider", onClick: onBack }} action={<button type="button" onClick={() => setEditing(true)} className="min-h-11 px-1 text-[17px] text-primary active:opacity-50">Redigera</button>}/>
+    <Card className="mb-6 flex items-center gap-4 p-4">
+      <DoseBadge items={[peptide]} size="lg"/>
+      <div className="min-w-0"><p className="text-[28px] font-bold leading-none tracking-tight tabular-nums">{n(units)} IU</p><p className="mt-1.5 text-[15px] text-muted-foreground">{n(peptide.doseMcg)} mcg · {routeNames[peptide.route]}{peptide.fasted ? " · Fastande" : ""}</p><p className="mt-0.5 text-[15px] text-muted-foreground">{peptide.mixGroupId ? `Mixgrupp ${peptide.mixGroupId} · ` : ""}{scheduleText(peptide, store)}</p></div>
+    </Card>
+    {asNeeded && <Button className="mb-6 h-[52px] w-full rounded-[14px] text-[17px]" disabled={store.todayAdditions.includes(todayKey)} onClick={() => { haptic(); update(s => ({ ...s, todayAdditions: [...new Set([...s.todayAdditions, todayKey])] })); }}>{store.todayAdditions.includes(todayKey) ? "Tillagd på Idag" : "Lägg till på Idag"}</Button>}
+    <SectionHeading title="Lager"/>
+    <Card className="mb-7 p-4">
+      <div className="flex items-baseline justify-between gap-3"><p className="text-[28px] font-bold leading-none tracking-tight tabular-nums">{n(peptide.remainingMg)}<span className="ml-1 text-[17px] font-semibold text-muted-foreground">av {n(peptide.vialMg)} mg</span></p><p className={`text-[15px] font-medium ${low ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>{Math.round(fraction * 100)} %</p></div>
+      <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-secondary"><div className={`h-full rounded-full transition-[width] duration-500 ${low ? "bg-amber-500" : "bg-primary"}`} style={{ width: `${fraction * 100}%` }}/></div>
+      <p className={`mt-3 text-[15px] ${low ? "font-medium text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>{days === null ? "Vid behov – ingen prognos" : days === 0 ? "Lagret är slut" : `Räcker ca ${days} ${days === 1 ? "dag" : "dagar"} enligt schemat`}</p>
+      {vialDays !== null && <p className={`mt-0.5 text-[15px] ${vialDays <= 0 ? "font-medium text-destructive" : "text-muted-foreground"}`}>{vialDays > 0 ? `Vialen håller ${vialDays} dagar till enligt din gräns` : "Vialens användningstid har passerat"}</p>}
+      <Button variant="secondary" className="mt-4 h-11 w-full rounded-[12px]" onClick={() => { if (window.confirm(`Nollställ lagret till en ny vial på ${n(peptide.vialMg)} mg?`)) set({ currentVialId: uid(), remainingMg: peptide.vialMg, reconstitutedAt: new Date().toISOString() }); }}><RotateCcw/> Öppnade ny vial</Button>
+    </Card>
+    <ListSection title="Senaste 30 dagarna">
+      <ListRow title="Tagna doser" value={recent.filter(log => log.status === "taken").length}/>
+      <ListRow title="Överhoppade" value={recent.filter(log => log.status === "skipped").length}/>
+      <ListRow title="Senast tagen" value={latest ? `${displayLogDate(logScheduledDate(latest, store.settings.dayBoundaryHour), { day: "numeric", month: "short" })} ${clock(latest.takenAt)}` : "–"}/>
+      <ListRow icon={<BarChart3/>} iconClassName="bg-primary" title="Historik och kurvor" chevron onClick={openInsights}/>
+    </ListSection>
+    {peptide.notes.trim() && <><SectionHeading title="Anteckning"/><Card className="mb-7 p-4 text-[15px] leading-6 whitespace-pre-wrap">{peptide.notes}</Card></>}
+    <ListSection footer="Arkiverade peptider syns inte på Idag men historiken sparas.">
+      <ListRow title={<span className="block text-center">Arkivera peptid</span>} destructive onClick={() => { if (window.confirm(`Arkivera ${peptide.name}?`)) { set({ archived: true }); onBack(); } }}/>
+    </ListSection>
+    {editing && <PeptideEditor peptide={peptide} adding={false} store={store} update={update} onClose={() => setEditing(false)}/>}
+  </>;
+}
+
+function CalendarView({ store, update, back }: { store: PeptimeStore; update: React.Dispatch<React.SetStateAction<PeptimeStore>>; back: { label: string; onClick: () => void } }) {
   const initialDate=stockholmDate();
   const [cursor,setCursor]=useState(new Date(`${initialDate}T12:00:00`));
   const [selected,setSelected]=useState(initialDate);
@@ -617,7 +958,7 @@ function CalendarView({ store, update, onBack }: { store: PeptimeStore; update: 
   const statusForDate=(date:string)=>{const logs=logsForDate(date);const note=store.dailyNotes.find(value=>value.date===date);return {complete:logs.length>0&&logs.every(log=>log.status==="taken"),skipped:logs.some(log=>log.status==="skipped"),noted:hasWellbeingData(note)}};
   const toggleRetrospectiveTag=(tag:string)=>setRetrospectiveNote(note=>note?{...note,tags:note.tags.includes(tag)?note.tags.filter(value=>value!==tag):[...note.tags,tag]}:note);
   const saveRetrospectiveNote=()=>{if(!retrospectiveNote||!hasWellbeingData(retrospectiveNote))return;update(s=>({...s,dailyNotes:[...s.dailyNotes.filter(note=>note.date!==retrospectiveNote.date),retrospectiveNote]}));setRetrospectiveNote(null)};
-  return <><PageHeader eyebrow="Historik" title="Kalender" action={<Button variant="ghost" onClick={onBack}>Klar</Button>}/><Card className="p-4"><div className="mb-5 flex items-center justify-between"><Button variant="ghost" size="icon" onClick={()=>setCursor(new Date(year,month-1,1))}><ChevronLeft/></Button><p className="font-medium capitalize">{new Intl.DateTimeFormat("sv-SE",{month:"long",year:"numeric"}).format(cursor)}</p><Button variant="ghost" size="icon" onClick={()=>setCursor(new Date(year,month+1,1))}><ChevronRight/></Button></div><div className="grid grid-cols-7 text-center font-mono text-[10px] text-muted-foreground">{"M T O T F L S".split(" ").map((d,i)=><span key={i} className="py-2">{d}</span>)}{cells.map((day,i)=>{if(!day)return <span key={i}/>;const date=iso(day);const status=statusForDate(date);return <button key={i} onClick={()=>setSelected(date)} className={`relative mx-auto grid size-11 place-items-center rounded-full border text-sm transition-colors ${selected===date?"border-primary bg-accent text-foreground":"border-transparent"}`}>{day}<span className="absolute bottom-0.5 flex gap-0.5">{status.complete&&<span className="size-1.5 rounded-full bg-primary"/>}{status.noted&&<span className="size-1.5 rounded-full bg-[#7f9fca]"/>}{status.skipped&&<span className="size-1.5 rounded-full bg-zinc-500"/>}</span></button>})}</div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 border-t border-border pt-3 text-[10px] text-muted-foreground"><span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-primary"/>Klart</span><span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-[#7f9fca]"/>Anteckning</span><span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-zinc-500"/>Överhoppat</span></div></Card><section className="mt-6"><h2 className="mb-3 font-mono text-xs font-medium">{selected}</h2>{!hasDayContent&&!canAddRetrospectiveNote?<p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Inga poster denna dag.</p>:hasDayContent?<Card className="divide-y divide-border">{dayLogs.map(l=><div key={l.id} className="flex min-h-14 items-center justify-between gap-3 px-4 text-sm"><span>{l.peptideName}</span><span className="text-right text-muted-foreground">{l.status==="taken"?`${n(l.actualDose)} mcg · ${n(l.computedIu)} IU`:"Överhoppad"}<span className="ml-2 tabular-nums">{new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Stockholm",hour:"2-digit",minute:"2-digit"}).format(new Date(l.takenAt))}</span></span></div>)}{dayNote&&hasDayNote&&<div className="p-4"><p className="mb-2 text-xs font-semibold text-muted-foreground">Dagens mående</p>{wellbeingScales.some(scale=>dayNote[scale.key]!==undefined)&&<div className="mb-3 grid grid-cols-2 gap-2">{wellbeingScales.filter(scale=>dayNote[scale.key]!==undefined).map(scale=><div key={scale.key} className="rounded-xl bg-muted/50 p-2 text-xs"><span className="block text-muted-foreground">{scale.title}</span><strong className="mt-1 block">{dayNote[scale.key]} / 5</strong></div>)}</div>}{dayNote.tags.length>0&&<div className="mb-3 flex flex-wrap gap-1.5">{dayNote.tags.map(tag=><span key={tag} className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs">{tagLabel(tag)}</span>)}</div>}{dayNote.note&&<p className="text-sm leading-6">{dayNote.note}</p>}</div>}</Card>:null}{canAddRetrospectiveNote&&<Card className="mt-3 p-4"><div className="flex items-center justify-between gap-4"><div><p className="font-medium">Dagens mående saknas</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Kan fyllas i upp till två dagar efteråt.</p></div><Button variant="outline" className="shrink-0" onClick={()=>setRetrospectiveNote({date:selected,note:"",tags:[]})}>Fyll i</Button></div></Card>}</section>
+  return <><PageHeader title="Kalender" back={back}/><Card className="p-4"><div className="mb-5 flex items-center justify-between"><Button variant="ghost" size="icon" onClick={()=>setCursor(new Date(year,month-1,1))}><ChevronLeft/></Button><p className="text-[17px] font-semibold capitalize">{new Intl.DateTimeFormat("sv-SE",{month:"long",year:"numeric"}).format(cursor)}</p><Button variant="ghost" size="icon" onClick={()=>setCursor(new Date(year,month+1,1))}><ChevronRight/></Button></div><div className="grid grid-cols-7 text-center text-[13px] font-medium text-muted-foreground">{"M T O T F L S".split(" ").map((d,i)=><span key={i} className="py-2">{d}</span>)}{cells.map((day,i)=>{if(!day)return <span key={i}/>;const date=iso(day);const status=statusForDate(date);return <button key={i} onClick={()=>setSelected(date)} className={`relative mx-auto grid size-11 place-items-center rounded-full text-[17px] tabular-nums transition-colors ${selected===date?"bg-primary font-semibold text-primary-foreground":date===initialDate?"font-semibold text-primary":""}`}>{day}<span className="absolute bottom-0.5 flex gap-0.5">{status.complete&&<span className="size-1.5 rounded-full bg-primary"/>}{status.noted&&<span className="size-1.5 rounded-full bg-[#7f9fca]"/>}{status.skipped&&<span className="size-1.5 rounded-full bg-zinc-500"/>}</span></button>})}</div><div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 border-t border-border pt-3 text-[13px] text-muted-foreground"><span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-primary"/>Klart</span><span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-[#7f9fca]"/>Anteckning</span><span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-zinc-500"/>Överhoppat</span></div></Card><section className="mt-6"><SectionHeading title={dayHeading(selected,initialDate)}/>{!hasDayContent&&!canAddRetrospectiveNote?<p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Inga poster denna dag.</p>:hasDayContent?<Card className="divide-y divide-border">{dayLogs.map(l=><div key={l.id} className="flex min-h-14 items-center justify-between gap-3 px-4 text-sm"><span>{l.peptideName}</span><span className="text-right text-muted-foreground">{l.status==="taken"?`${n(l.actualDose)} mcg · ${n(l.computedIu)} IU`:"Överhoppad"}<span className="ml-2 tabular-nums">{new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Stockholm",hour:"2-digit",minute:"2-digit"}).format(new Date(l.takenAt))}</span></span></div>)}{dayNote&&hasDayNote&&<div className="p-4"><p className="mb-2 text-xs font-semibold text-muted-foreground">Dagens mående</p>{wellbeingScales.some(scale=>dayNote[scale.key]!==undefined)&&<div className="mb-3 grid grid-cols-2 gap-2">{wellbeingScales.filter(scale=>dayNote[scale.key]!==undefined).map(scale=><div key={scale.key} className="rounded-xl bg-muted/50 p-2 text-xs"><span className="block text-muted-foreground">{scale.title}</span><strong className="mt-1 block">{dayNote[scale.key]} / 5</strong></div>)}</div>}{dayNote.tags.length>0&&<div className="mb-3 flex flex-wrap gap-1.5">{dayNote.tags.map(tag=><span key={tag} className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs">{tagLabel(tag)}</span>)}</div>}{dayNote.note&&<p className="text-sm leading-6">{dayNote.note}</p>}</div>}</Card>:null}{canAddRetrospectiveNote&&<Card className="mt-3 p-4"><div className="flex items-center justify-between gap-4"><div><p className="font-medium">Dagens mående saknas</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Kan fyllas i upp till två dagar efteråt.</p></div><Button variant="outline" className="shrink-0" onClick={()=>setRetrospectiveNote({date:selected,note:"",tags:[]})}>Fyll i</Button></div></Card>}</section>
     <Dialog open={!!retrospectiveNote} onOpenChange={open=>!open&&setRetrospectiveNote(null)}><DialogContent className="max-h-[88dvh] overflow-y-auto"><DialogHeader><DialogTitle>Hur mådde du?</DialogTitle><DialogDescription>{retrospectiveNote?.date} · fylls i i efterhand</DialogDescription></DialogHeader>{retrospectiveNote&&<div className="space-y-4">{wellbeingScales.map(scale=><WellbeingScale key={scale.key} scale={scale} value={retrospectiveNote[scale.key]} onChange={value=>setRetrospectiveNote(note=>note?{...note,[scale.key]:value}:note)}/>) }<div><p className="mb-2 text-[15px] font-semibold">Hur kändes dagen?</p><div className="flex flex-wrap gap-2">{[...dailyTags.map(tag=>tag.id),...store.settings.customDailyTags].map(tag=><button type="button" key={tag} aria-pressed={retrospectiveNote.tags.includes(tag)} onClick={()=>toggleRetrospectiveTag(tag)} className={`min-h-11 rounded-full px-3 text-[13px] transition-colors ${retrospectiveNote.tags.includes(tag)?"bg-primary text-primary-foreground":"bg-muted text-muted-foreground"}`}>{tagLabel(tag)}</button>)}</div></div><label className="text-sm font-medium">Anteckning <span className="font-normal text-muted-foreground">· valfritt</span><Textarea className="mt-2 resize-none" value={retrospectiveNote.note} onChange={event=>setRetrospectiveNote(note=>note?{...note,note:event.target.value}:note)} placeholder="Något du vill komma ihåg?"/></label><Button disabled={!hasWellbeingData(retrospectiveNote)} className="h-12 w-full" onClick={saveRetrospectiveNote}>Spara mående</Button></div>}</DialogContent></Dialog>
   </>;
 }
@@ -628,19 +969,47 @@ function subscribeOnline(onChange: () => void) {
   return () => { window.removeEventListener("online", onChange); window.removeEventListener("offline", onChange); };
 }
 
+type View = "today" | "log" | "peptides" | "insights" | "peptide" | "peptide-insights" | "planner" | "schedule-sharing" | "calendar" | "settings";
+type Tab = "today" | "log" | "peptides" | "insights";
+const tabLabels: Record<Tab, string> = { today: "Idag", log: "Logg", peptides: "Peptider", insights: "Insikter" };
+
 export function PeptimeApp({ userEmail }: { userEmail?: string }) {
-  const [store,update,ready,syncState,retrySync,syncError,userId,recoveryActive,recoveryCounts,restoreMissingRecords,importSharedSchedule]=useStore(); const [view,setView]=useState("today");
-  const [insightPeptideId,setInsightPeptideId]=useState<string|null>(null);
-  const [insightReturnView,setInsightReturnView]=useState<"peptides"|"insights">("peptides");
-  const [calendarReturnView,setCalendarReturnView]=useState<"today"|"insights">("today");
-  const openCalendar=(from:"today"|"insights")=>{setCalendarReturnView(from);setView("calendar")};
-  const openPeptideInsights=(id:string,from:"peptides"|"insights")=>{setInsightPeptideId(id);setInsightReturnView(from);setView("peptide-insights")};
+  const [store,update,ready,syncState,retrySync,syncError,userId,recoveryActive,recoveryCounts,restoreMissingRecords,importSharedSchedule]=useStore();
+  const [tab,setTab]=useState<Tab>("today");
+  const [view,setView]=useState<View>("today");
+  const [peptideId,setPeptideId]=useState<string|null>(null);
+  const [insightReturn,setInsightReturn]=useState<"peptide"|"insights">("insights");
+  const [checkinOnOpen,setCheckinOnOpen]=useState(false);
+  const navigate=(next:View)=>{setView(next);window.scrollTo(0,0)};
+  // Tapping the current tab again returns to its first screen, as in iOS.
+  const selectTab=(next:Tab)=>{setTab(next);navigate(next)};
+  const openPeptideInsights=(id:string,from:"peptide"|"insights")=>{setPeptideId(id);setInsightReturn(from);navigate("peptide-insights")};
+  const logMood=()=>{setCheckinOnOpen(true);selectTab("today")};
   // Views compute "today" when they render; remount them when the date changes while the app stays open.
   const [day,setDay]=useState(()=>stockholmDate());
   useEffect(()=>{const check=()=>setDay(stockholmDate());const timer=window.setInterval(check,60_000);document.addEventListener("visibilitychange",check);return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",check)}},[]);
   const online=useSyncExternalStore(subscribeOnline,()=>navigator.onLine,()=>true);
   useEffect(()=>{const media=window.matchMedia("(prefers-color-scheme: dark)");const apply=()=>applyThemeMode(store.settings.themeMode??"system");apply();media.addEventListener("change",apply);return()=>media.removeEventListener("change",apply)},[store.settings.themeMode]);
-  if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><RotateCcw className="mx-auto size-7 text-muted-foreground"/><h1 className="mt-4 text-xl font-medium">Kunde inte hämta ditt konto</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p>{syncError&&<p className="mt-3 break-words text-sm text-destructive">{syncError}</p>}<Button className="mt-5 h-12 w-full" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
+  if(!ready)return syncState==="error"?<main className="grid min-h-dvh place-items-center bg-background p-5"><Card className="w-full max-w-[430px] p-6 text-center"><span className="mx-auto grid size-14 place-items-center rounded-full bg-secondary text-muted-foreground"><RotateCcw className="size-7"/></span><h1 className="mt-4 text-[20px] font-bold">Kunde inte hämta ditt konto</h1><p className="mt-2 text-[15px] leading-6 text-muted-foreground">Dina uppgifter är kvar. Peptime försöker ansluta igen automatiskt.</p>{syncError&&<p className="mt-3 break-words text-[13px] text-destructive">{syncError}</p>}<Button className="mt-5 h-[52px] w-full rounded-[14px] text-[17px]" onClick={retrySync}>Försök igen</Button></Card></main>:<div className="min-h-dvh bg-background"/>;
   if(!store.onboardingComplete)return <Onboarding store={store} update={update}/>;
-  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6">{recoveryActive&&<button type="button" onClick={()=>setView("settings")} className="mt-[calc(1rem+env(safe-area-inset-top))] w-full rounded-2xl border border-amber-600/40 bg-amber-500/10 p-3 text-left text-sm leading-5 text-foreground">Återställningsläge aktivt. Kontosynk är pausad för att skydda uppgifterna. Exportera data i Inställningar.</button>}<Fragment key={day}>{view==="today"&&<TodayView store={store} update={update} openCalendar={()=>openCalendar("today")}/>} {view==="log"&&<LogView store={store} update={update}/>} {view==="peptides"&&<PeptidesView store={store} update={update} openPlanner={()=>setView("planner")} openSchedules={()=>setView("schedule-sharing")} openInsights={id=>openPeptideInsights(id,"peptides")}/>} {view==="peptide-insights"&&insightPeptideId&&store.peptides.find(peptide=>peptide.id===insightPeptideId)&&<PeptideInsights store={store} peptide={store.peptides.find(peptide=>peptide.id===insightPeptideId)!} onBack={()=>setView(insightReturnView)}/>} {view==="insights"&&<InsightsView store={store} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>openCalendar("insights")}/>} {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>setView("peptides")}/>} {view==="schedule-sharing"&&<ScheduleSharing store={store} onBack={()=>setView("peptides")} importSchedule={importSharedSchedule} importEnabled={Boolean(userId)&&!recoveryActive&&syncState!=="error"&&syncState!=="syncing"}/>} {view==="calendar"&&<CalendarView store={store} update={update} onBack={()=>setView(calendarReturnView)}/>} {view==="settings"&&<SettingsView store={store} update={update} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId} preserveLocal={recoveryActive} recoveryCounts={recoveryCounts} restoreMissingRecords={restoreMissingRecords}/>}</Fragment>{!online&&<div role="status" className="pointer-events-none fixed inset-x-0 bottom-[calc(86px+env(safe-area-inset-bottom))] z-40 mx-auto w-fit rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg ring-4 ring-background">Offline · ändringar sparas på enheten</div>}<BottomNav view={view==="peptide-insights"?insightReturnView:view==="calendar"?calendarReturnView:view} setView={setView}/></main>;
+  const headerAction=<ProfileButton email={userEmail} onClick={()=>navigate("settings")}/>;
+  const peptide=peptideId?store.peptides.find(item=>item.id===peptideId):undefined;
+  const backToTab={label:tabLabels[tab],onClick:()=>navigate(tab)};
+  return <main className="mx-auto min-h-dvh w-full max-w-[500px] bg-background px-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-6">
+    {recoveryActive&&view!=="settings"&&<button type="button" onClick={()=>navigate("settings")} className="mt-[calc(.75rem+env(safe-area-inset-top))] flex w-full items-start gap-3 rounded-[14px] bg-amber-500/12 p-3 text-left text-[15px] leading-5"><TriangleAlert className="mt-0.5 size-5 shrink-0 text-amber-600"/><span>Kontosynk är pausad för att skydda dina uppgifter. <span className="font-semibold text-primary">Öppna Inställningar</span></span></button>}
+    <Fragment key={day}>
+      {view==="today"&&<TodayView store={store} update={update} openCalendar={()=>navigate("calendar")} headerAction={headerAction} openCheckinInitially={checkinOnOpen} onCheckinClosed={()=>setCheckinOnOpen(false)}/>}
+      {view==="log"&&<LogView store={store} update={update} headerAction={headerAction} openCalendar={()=>navigate("calendar")}/>}
+      {view==="peptides"&&<PeptidesView store={store} update={update} headerAction={headerAction} openPlanner={()=>navigate("planner")} openSchedules={()=>navigate("schedule-sharing")} openPeptide={id=>{setPeptideId(id);navigate("peptide")}}/>}
+      {view==="peptide"&&(peptide?<PeptideDetail store={store} update={update} peptide={peptide} onBack={()=>navigate("peptides")} openInsights={()=>openPeptideInsights(peptide.id,"peptide")}/>:<PeptidesView store={store} update={update} headerAction={headerAction} openPlanner={()=>navigate("planner")} openSchedules={()=>navigate("schedule-sharing")} openPeptide={id=>{setPeptideId(id);navigate("peptide")}}/>)}
+      {view==="peptide-insights"&&peptide&&<PeptideInsights store={store} peptide={peptide} back={insightReturn==="peptide"?{label:peptide.name,onClick:()=>navigate("peptide")}:{label:"Insikter",onClick:()=>navigate("insights")}}/>}
+      {view==="insights"&&<InsightsView store={store} headerAction={headerAction} onOpenPeptide={id=>openPeptideInsights(id,"insights")} onOpenCalendar={()=>navigate("calendar")} onLogMood={logMood}/>}
+      {view==="planner"&&<PurchasePlanner peptides={store.peptides} plans={store.purchasePlans} onChange={purchasePlans=>update(s=>({...s,purchasePlans}))} onBack={()=>navigate("peptides")}/>}
+      {view==="schedule-sharing"&&<ScheduleSharing store={store} onBack={()=>navigate("peptides")} importSchedule={importSharedSchedule} importEnabled={Boolean(userId)&&!recoveryActive&&syncState!=="error"&&syncState!=="syncing"}/>}
+      {view==="calendar"&&<CalendarView store={store} update={update} back={backToTab}/>}
+      {view==="settings"&&<SettingsView store={store} update={update} back={backToTab} syncState={syncState} retrySync={retrySync} syncError={syncError} userEmail={userEmail} userId={userId} preserveLocal={recoveryActive} recoveryCounts={recoveryCounts} restoreMissingRecords={restoreMissingRecords}/>}
+    </Fragment>
+    {!online&&<div role="status" className="pointer-events-none fixed inset-x-0 bottom-[calc(68px+env(safe-area-inset-bottom))] z-30 mx-auto w-fit rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background shadow-lg ring-4 ring-background">Offline · ändringar sparas på enheten</div>}
+    <BottomNav tab={tab} onSelect={selectTab}/>
+  </main>;
 }

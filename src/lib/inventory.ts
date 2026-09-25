@@ -49,3 +49,18 @@ export function replaceDoseLog(store: PeptimeStore, edited: DoseLog): PeptimeSto
       : store.peptides,
   };
 }
+
+/** Put a deleted log back and take its dose from the vial again (undo of deleteDoseLog). */
+export function restoreDoseLog(store: PeptimeStore, log: DoseLog): PeptimeStore {
+  if (store.logs.some(item => item.id === log.id)) return store;
+  const usedMg = doseLogMg(log);
+  return {
+    ...store,
+    logs: [log, ...store.logs],
+    peptides: usedMg > 0
+      ? store.peptides.map(peptide => peptide.id === log.peptideId
+        ? { ...peptide, remainingMg: clampInventoryMg(peptide.remainingMg - usedMg, peptide.vialMg) }
+        : peptide)
+      : store.peptides,
+  };
+}

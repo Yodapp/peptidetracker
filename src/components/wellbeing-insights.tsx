@@ -42,10 +42,10 @@ export function WellbeingInsights({ store, period, peptideId }: { store: Peptime
   };
   const context = activePeptideId === "all" ? "alla doser" : exposure.label;
 
-  return <section className="mb-5 rounded-[20px] border border-border bg-card p-5 shadow-[0_1px_2px_rgba(0,0,0,.025)]">
-    <div className="mb-4 flex items-center gap-2"><Activity className="size-4 text-primary"/><div><h2 className="text-lg font-medium">Mående efter dos</h2><p className="mt-0.5 text-xs text-muted-foreground">Jämför dina svar på dosdagar och andra dagar</p></div></div>
+  return <section className="mb-7 rounded-[18px] bg-card p-5">
+    <div className="mb-4 flex items-center gap-2"><Activity className="size-4 text-primary"/><div><h2 className="text-[17px] font-semibold">Mående efter dos</h2><p className="mt-0.5 text-xs text-muted-foreground">Jämför dina svar på dosdagar och andra dagar</p></div></div>
 
-    <div className="grid grid-cols-2 gap-2">{metricDefinitions.map(value => <button type="button" key={value.key} aria-pressed={metricKey === value.key} onClick={() => changeMetric(value.key)} className={`min-h-10 rounded-xl border px-3 text-xs ${metricKey === value.key ? "border-primary bg-accent text-accent-foreground" : "border-border text-muted-foreground"}`}>{value.label}</button>)}</div>
+    <div className="grid grid-cols-2 gap-2">{metricDefinitions.map(value => <button type="button" key={value.key} aria-pressed={metricKey === value.key} onClick={() => changeMetric(value.key)} className={`min-h-10 rounded-full px-3 text-[15px] transition-colors ${metricKey === value.key ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground/80"}`}>{value.label}</button>)}</div>
 
     {!peptideId && <label className="mt-4 block text-xs text-muted-foreground">Peptid<select value={selectedPeptideId} onChange={event => { setSelectedPeptideId(event.target.value); setSelectedDate(null); }} className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-base text-foreground"><option value="all">Alla doser</option>{store.peptides.filter(peptide => !peptide.archived).map(peptide => <option key={peptide.id} value={peptide.id}>{peptide.name}</option>)}</select></label>}
 
